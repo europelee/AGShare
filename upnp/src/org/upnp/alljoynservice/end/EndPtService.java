@@ -1,4 +1,6 @@
 package org.upnp.alljoynservice.end;
+import java.util.HashMap;
+
 import org.alljoyn.bus.BusAttachment;
 import org.alljoyn.bus.BusListener;
 import org.alljoyn.bus.Mutable;
@@ -71,6 +73,10 @@ public class EndPtService extends Service  implements ServiceConfig {
 
 	//private AlljoynSessionListener  mSessionListener    = null;
 	
+	//for monitoring clientlist
+	//key: uniquename, value: sessionid
+	HashMap<String, Long> mClientList = new HashMap<String, Long>(); 
+
 	public void  setAcceptStatus(boolean status)
 	{
 		this.mIsAccept = status;
@@ -458,6 +464,8 @@ public class EndPtService extends Service  implements ServiceConfig {
 										"BusListener.sessionJoined(%d, %d, %s): on RAW_PORT",
 										sessionPort, sessionId, joiner));
 						mSessionId = sessionId;
+						//
+						mClientList.put(joiner, (long)mSessionId);
 						
 						//for monitoring cli
 						Status val = mBus.setSessionListener(mSessionId, new AlljoynSessionListener());
