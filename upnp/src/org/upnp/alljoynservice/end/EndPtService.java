@@ -75,7 +75,7 @@ public class EndPtService extends Service  implements ServiceConfig {
 	
 	//for monitoring clientlist
 	//key: uniquename, value: sessionid
-	HashMap<String, Long> mClientList = new HashMap<String, Long>(); 
+	HashMap<Long, String> mClientList = new HashMap<Long, String>(); 
 
 	public void  setAcceptStatus(boolean status)
 	{
@@ -465,7 +465,7 @@ public class EndPtService extends Service  implements ServiceConfig {
 										sessionPort, sessionId, joiner));
 						mSessionId = sessionId;
 						//
-						mClientList.put(joiner, (long)mSessionId);
+						mClientList.put((long)mSessionId, joiner);
 						
 						//for monitoring cli
 						Status val = mBus.setSessionListener(mSessionId, new AlljoynSessionListener());
