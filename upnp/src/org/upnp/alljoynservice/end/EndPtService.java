@@ -1,4 +1,5 @@
 package org.upnp.alljoynservice.end;
+import java.util.ArrayList;
 import java.util.HashMap;
 
 import org.alljoyn.bus.BusAttachment;
@@ -75,8 +76,46 @@ public class EndPtService extends Service  implements ServiceConfig {
 	
 	//for monitoring clientlist
 	//key: uniquename, value: sessionid
-	HashMap<Long, String> mClientList = new HashMap<Long, String>(); 
+	//when session use multipoint, some different joinernames would correspond to same sessionid
+	HashMap<Long, ArrayList<String> > mClientList = new HashMap<Long, ArrayList<String>>(); 
 
+	   //使用ArrayList实现一个Key对应一个ArrayList实现一对多  
+
+     private void putAdd(Long key, String s)
+     {  
+
+         if(!mClientList.containsKey(key)){  
+
+        	 mClientList.put(key, new ArrayList<String>());  
+
+         }  
+
+        	mClientList.get(key).add(s);  
+     }  
+
+     private void delElem(Long key, String s)
+     {  
+
+         if(!mClientList.containsKey(key)){  
+
+        	Log.i(TAG, "del "+s+" fail: not key "+key); 
+        	return;
+
+         }  
+
+        boolean bRet =	mClientList.get(key).contains(s); 
+        if (!bRet)
+        {
+        	Log.i(TAG, "error happen, key:"+key+" not have "+s);
+        	return;
+        }
+        
+        bRet = mClientList.get(key).remove(s);
+        if (!bRet)
+        	Log.i(TAG, "error happen, key:"+key+" remove "+s+" fail");
+        
+     }
+     
 	public void  setAcceptStatus(boolean status)
 	{
 		this.mIsAccept = status;
@@ -175,26 +214,39 @@ public class EndPtService extends Service  implements ServiceConfig {
 		@Override
 		public void sessionLost(int sessionId, int reason) {
 			
+			//Any implementation of this function must be multithread safe
 			//mIsjoinSession = false;	//just cli need	
-			mAwareLosSess   = true;
-			logStatus(
-					String.format(
-							"MyBusListener.sessionLost(sessionId = %d, reason = %d)",
-							sessionId, reason), Status.OK);
+			
+			//
+			boolean bExist = mClientList.containsKey(sessionId);
+			if (bExist)
+			{
+				ArrayList<String> joinerList = mClientList.get(sessionId);
+				joinerList.clear();
+				
+				mClientList.remove(sessionId);
+				
+				mAwareLosSess   = true;
+				
+				logStatus(
+						String.format(
+								"AlljoynSessionListener.sessionLost(sessionId = %d, reason = %d)",
+								sessionId, reason), Status.OK);
+			}
 		}
 		
 		@Override
 		public void sessionMemberAdded(int sessionId, String uniqueName) 
 		{
 			Log.i(TAG, "add:"+"sessid:"+sessionId+" uniquename:"+uniqueName);
-			
+			putAdd((long)sessionId, uniqueName);
 		}
 		
 		@Override
 		public void sessionMemberRemoved(int sessionId, String uniqueName)
 		{
 			Log.i(TAG, "remove:"+"sessid:"+sessionId+" uniquename:"+uniqueName);
-			
+			delElem((long)sessionId, uniqueName);
 		}
 	};
 	private final class BackgroundHandler extends Handler {
@@ -429,7 +481,7 @@ public class EndPtService extends Service  implements ServiceConfig {
         
         SessionOpts sessionOpts = new SessionOpts();
         sessionOpts.traffic = SessionOpts.TRAFFIC_MESSAGES;
-        sessionOpts.isMultipoint = false;
+        sessionOpts.isMultipoint = true;
         sessionOpts.proximity = SessionOpts.PROXIMITY_ANY;
         /*
          * Explicitly add the Wi-Fi Direct transport into our
@@ -459,13 +511,15 @@ public class EndPtService extends Service  implements ServiceConfig {
 					@Override
 					public void sessionJoined(short sessionPort,
 							int sessionId, String joiner) {
+						
+						// Any implementation of this function must be multithread safe
 						Log.i(TAG,
 								String.format(
 										"BusListener.sessionJoined(%d, %d, %s): on RAW_PORT",
 										sessionPort, sessionId, joiner));
 						mSessionId = sessionId;
 						//
-						mClientList.put((long)mSessionId, joiner);
+						putAdd((long)mSessionId, joiner);
 						
 						//for monitoring cli
 						Status val = mBus.setSessionListener(mSessionId, new AlljoynSessionListener());
@@ -557,6 +611,8 @@ public class EndPtService extends Service  implements ServiceConfig {
 		mBus.release();
 		
 		mIsConnected = false;
+		
+		mClientList.clear();
 		
 		boolean isStop = this.busThread.quit();
 		if (false == isStop)
