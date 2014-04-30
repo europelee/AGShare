@@ -83,37 +83,41 @@ public class EndPtService extends Service  implements ServiceConfig {
 
      private void putAdd(Long key, String s)
      {  
-
-         if(!mClientList.containsKey(key)){  
-
-        	 mClientList.put(key, new ArrayList<String>());  
-
-         }  
-
-        	mClientList.get(key).add(s);  
+    	 synchronized(EndPtService.this)
+    	 {
+    		 
+	         if(!mClientList.containsKey(key)){  
+	
+	        	 mClientList.put(key, new ArrayList<String>());  
+	
+	         }  
+	
+	        	mClientList.get(key).add(s);
+    	 }
      }  
 
      private void delElem(Long key, String s)
      {  
-
-         if(!mClientList.containsKey(key)){  
-
-        	Log.i(TAG, "del "+s+" fail: not key "+key); 
-        	return;
-
-         }  
-
-        boolean bRet =	mClientList.get(key).contains(s); 
-        if (!bRet)
-        {
-        	Log.i(TAG, "error happen, key:"+key+" not have "+s);
-        	return;
-        }
-        
-        bRet = mClientList.get(key).remove(s);
-        if (!bRet)
-        	Log.i(TAG, "error happen, key:"+key+" remove "+s+" fail");
-        
+    	 synchronized(EndPtService.this)
+    	 {
+	         if(!mClientList.containsKey(key)){  
+	
+	        	Log.i(TAG, "del "+s+" fail: not key "+key); 
+	        	return;
+	
+	         }  
+	
+	        boolean bRet =	mClientList.get(key).contains(s); 
+	        if (!bRet)
+	        {
+	        	Log.i(TAG, "error happen, key:"+key+" not have "+s);
+	        	return;
+	        }
+	        
+	        bRet = mClientList.get(key).remove(s);
+	        if (!bRet)
+	        	Log.i(TAG, "error happen, key:"+key+" remove "+s+" fail");
+    	 }
      }
      
 	public void  setAcceptStatus(boolean status)
@@ -218,21 +222,24 @@ public class EndPtService extends Service  implements ServiceConfig {
 			//mIsjoinSession = false;	//just cli need	
 			
 			//
-			boolean bExist = mClientList.containsKey(sessionId);
-			if (bExist)
-			{
-				ArrayList<String> joinerList = mClientList.get(sessionId);
-				joinerList.clear();
-				
-				mClientList.remove(sessionId);
-				
-				mAwareLosSess   = true;
-				
-				logStatus(
-						String.format(
-								"AlljoynSessionListener.sessionLost(sessionId = %d, reason = %d)",
-								sessionId, reason), Status.OK);
-			}
+	    	synchronized(EndPtService.this)
+	    	{
+				boolean bExist = mClientList.containsKey(sessionId);
+				if (bExist)
+				{
+					ArrayList<String> joinerList = mClientList.get(sessionId);
+					joinerList.clear();
+					
+					mClientList.remove(sessionId);
+					
+					mAwareLosSess   = true;
+					
+					logStatus(
+							String.format(
+									"AlljoynSessionListener.sessionLost(sessionId = %d, reason = %d)",
+									sessionId, reason), Status.OK);
+				}
+	    	}
 		}
 		
 		@Override
@@ -612,8 +619,10 @@ public class EndPtService extends Service  implements ServiceConfig {
 		
 		mIsConnected = false;
 		
-		mClientList.clear();
-		
+	   	synchronized(EndPtService.this)
+	   	{
+			mClientList.clear();
+	   	}
 		boolean isStop = this.busThread.quit();
 		if (false == isStop)
 			Log.i(TAG, "busthread stop fail!!!");
