@@ -2,6 +2,7 @@ package org.upnp.alljoynservice.end;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 
 import org.alljoyn.bus.BusAttachment;
 import org.alljoyn.bus.BusListener;
@@ -75,8 +76,49 @@ public class EndPtService extends Service implements ServiceConfig
 	// to same sessionid
 	HashMap<Long, ArrayList<String>> mClientList = new HashMap<Long, ArrayList<String>>();
 
-	// 使用ArrayList实现一个Key对应一个ArrayList实现一对多
+	/**
+	 * 
+	 * @Title: getClientList
+	 * @Description: deepcopy, used by app layer, avoid sync needed at app layer
+	 * @param @return
+	 * @return HashMap<Long,ArrayList<String>>
+	 * @throws
+	 */
+	public HashMap<Long, ArrayList<String>> getClientList()
+	{
+		HashMap<Long, ArrayList<String>> targetList = new HashMap<Long, ArrayList<String>>();
 
+		synchronized (EndPtService.class)
+		{
+			for (Iterator<Long> keyIt = mClientList.keySet().iterator(); keyIt
+					.hasNext();)
+			{
+				Object key = keyIt.next();
+
+				ArrayList<String> nameList = mClientList.get(key);
+				targetList.put((Long) key, new ArrayList<String>());
+
+				int lSize = nameList.size();
+				for (int i = 0; i < lSize; ++i)
+				{
+					targetList.get(key).add(nameList.get(i));
+				}
+			}
+
+		}
+		return targetList;
+	}
+
+	// 使用ArrayList实现一个Key对应一个ArrayList实现一对多
+	/**
+	 * 
+	 * @Title: putAdd
+	 * @Description: TODO
+	 * @param @param key
+	 * @param @param s
+	 * @return void
+	 * @throws
+	 */
 	private void putAdd(Long key, String s)
 	{
 		synchronized (EndPtService.this)
@@ -89,7 +131,8 @@ public class EndPtService extends Service implements ServiceConfig
 
 			}
 
-			mClientList.get(key).add(s);
+			if (!(mClientList.get(key).contains(s)))
+				mClientList.get(key).add(s);
 		}
 	}
 
