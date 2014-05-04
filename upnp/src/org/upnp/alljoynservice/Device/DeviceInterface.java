@@ -7,21 +7,21 @@ import org.alljoyn.bus.annotation.BusInterface;
 import org.alljoyn.bus.annotation.BusMethod;
 
 @BusInterface(name = "org.upnp.alljoynservice.DeviceInterface")
-public interface DeviceInterface 
+public interface DeviceInterface
 {
-    
-    @BusMethod
+
+	@BusMethod
 	void testRPC(String recvInfo) throws BusException;
-    
-    @BusMethod
-    String requireStrInfo() throws BusException;
-    
-    @BusMethod
+
+	@BusMethod
+	String requireStrInfo() throws BusException;
+
+	@BusMethod
 	void getStrInfo(String recvInfo) throws BusException;
-    
-    @BusMethod
-    boolean getNotifyStatus();
-    
-    @BusMethod
-    boolean getRecvStatus();
+
+	@BusMethod
+	boolean getNotifyStatus();
+
+	@BusMethod
+	boolean getRecvStatus();
 }
