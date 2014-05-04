@@ -57,7 +57,7 @@ public class EndPtService extends Service implements ServiceConfig
 	private String mServiceName = "org.smarthome.demoservice";
 	private short mServicePort = 889;
 	private String mBusObjPath = "/DemoService";
-
+	private String mSerGUIDName = "";
 	private BackgroundHandler mBackgroundHandler = null;
 	private HandlerThread busThread = null;
 	private BusAttachment mBus = null;
@@ -239,6 +239,7 @@ public class EndPtService extends Service implements ServiceConfig
 			Log.i(TAG, String.format(
 					"MyBusListener.foundAdvertisedName(%s, 0x%04x, %s)", name,
 					transport, namePrefix));
+			
 			if (!mIsjoinSession)
 			{
 				Message msg = mBackgroundHandler.obtainMessage(JOIN_SESSION);
@@ -633,19 +634,21 @@ public class EndPtService extends Service implements ServiceConfig
 		int flag = BusAttachment.ALLJOYN_REQUESTNAME_FLAG_REPLACE_EXISTING
 				| BusAttachment.ALLJOYN_REQUESTNAME_FLAG_DO_NOT_QUEUE;
 
-		status = mBus.requestName(mServiceName, flag);
+		mSerGUIDName = mServiceName + mBus.getGlobalGUIDString();
+		
+		status = mBus.requestName(mSerGUIDName, flag);
 		logStatus(String.format("BusAttachment.requestName(%s, 0x%08x)",
-				mServiceName, flag), status);
+				mSerGUIDName, flag), status);
 		if (status == Status.OK)
 		{
 			status = mBus
-					.advertiseName(mServiceName, SessionOpts.TRANSPORT_ANY);
-			logStatus("BusAttachement.advertiseName " + mServiceName, status);
+					.advertiseName(mSerGUIDName, SessionOpts.TRANSPORT_ANY);
+			logStatus("BusAttachement.advertiseName " + mSerGUIDName, status);
 			if (status != Status.OK)
 			{
-				status = mBus.releaseName(mServiceName);
+				status = mBus.releaseName(mSerGUIDName);
 				logStatus(String.format("BusAttachment.releaseName(%s)",
-						mServiceName), status);
+						mSerGUIDName), status);
 				mBus.unbindSessionPort(mServicePort);
 				mBus.unregisterBusObject(mDev);
 				mBus.unregisterBusListener(mBusListener);
@@ -672,8 +675,8 @@ public class EndPtService extends Service implements ServiceConfig
 
 		if (ServiceRole.SERVER_END == mRole)
 		{
-			mBus.cancelAdvertiseName(mServiceName, SessionOpts.TRANSPORT_ANY);
-			mBus.releaseName(mServiceName);
+			mBus.cancelAdvertiseName(mSerGUIDName, SessionOpts.TRANSPORT_ANY);
+			mBus.releaseName(mSerGUIDName);
 			mBus.unbindSessionPort(mServicePort);
 		}
 
@@ -745,7 +748,8 @@ public class EndPtService extends Service implements ServiceConfig
 			return false;
 		}
 
-		mProxyObj = mBus.getProxyBusObject(mServiceName, mBusObjPath,
+		//mServiceName a prefix name, while name : mServiceName+guid
+		mProxyObj = mBus.getProxyBusObject(name, mBusObjPath,
 				sessionId.value, new Class<?>[] { DeviceInterface.class });
 
 		// mProxyObj.setReplyTimeout(3);
