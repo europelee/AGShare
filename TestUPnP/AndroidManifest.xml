@@ -34,7 +34,7 @@
             </intent-filter>
         </activity>
         
-             <service android:name="com.tpv.smarthome.communication.upnp.EndPtService">
+             <service android:name="org.upnp.alljoynservice.end.EndPtService">
            
      </service>
     </application>

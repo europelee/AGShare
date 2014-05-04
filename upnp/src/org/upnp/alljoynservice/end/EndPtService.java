@@ -239,7 +239,7 @@ public class EndPtService extends Service implements ServiceConfig
 			Log.i(TAG, String.format(
 					"MyBusListener.foundAdvertisedName(%s, 0x%04x, %s)", name,
 					transport, namePrefix));
-			
+
 			if (!mIsjoinSession)
 			{
 				Message msg = mBackgroundHandler.obtainMessage(JOIN_SESSION);
@@ -281,20 +281,26 @@ public class EndPtService extends Service implements ServiceConfig
 			//
 			synchronized (EndPtService.this)
 			{
-				boolean bExist = mClientList.containsKey(sessionId);
+				//sessionid need be casted to long type, else containskey return false
+				//fuck java!
+				boolean bExist = mClientList.containsKey((long)sessionId);
 				if (bExist)
 				{
-					ArrayList<String> joinerList = mClientList.get(sessionId);
+					ArrayList<String> joinerList = mClientList.get((long)sessionId);
 					joinerList.clear();
 
-					mClientList.remove(sessionId);
-
+					mClientList.remove((long)sessionId);
+					
 					mAwareLosSess = true;
 
 					logStatus(
 							String.format(
 									"AlljoynSessionListener.sessionLost(sessionId = %d, reason = %d)",
 									sessionId, reason), Status.OK);
+				}
+				else
+				{
+					Log.e(TAG, "happen exception error, not exist sessionid "+sessionId);
 				}
 			}
 		}
@@ -635,7 +641,7 @@ public class EndPtService extends Service implements ServiceConfig
 				| BusAttachment.ALLJOYN_REQUESTNAME_FLAG_DO_NOT_QUEUE;
 
 		mSerGUIDName = mServiceName + mBus.getGlobalGUIDString();
-		
+
 		status = mBus.requestName(mSerGUIDName, flag);
 		logStatus(String.format("BusAttachment.requestName(%s, 0x%08x)",
 				mSerGUIDName, flag), status);
@@ -748,9 +754,9 @@ public class EndPtService extends Service implements ServiceConfig
 			return false;
 		}
 
-		//mServiceName a prefix name, while name : mServiceName+guid
-		mProxyObj = mBus.getProxyBusObject(name, mBusObjPath,
-				sessionId.value, new Class<?>[] { DeviceInterface.class });
+		// mServiceName a prefix name, while name : mServiceName+guid
+		mProxyObj = mBus.getProxyBusObject(name, mBusObjPath, sessionId.value,
+				new Class<?>[] { DeviceInterface.class });
 
 		// mProxyObj.setReplyTimeout(3);
 		mDevI = mProxyObj.getInterface(DeviceInterface.class);
