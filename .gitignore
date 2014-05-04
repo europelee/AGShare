@@ -1,4 +1,7 @@
 ControlPanel
 HomeInfoCenter
 upnp/gen
-upnp/bin/classes
+upnp/bin
+TestUPnP/gen
+TestUPnP/bin
+TestUPnP/libs/upnp.jar
