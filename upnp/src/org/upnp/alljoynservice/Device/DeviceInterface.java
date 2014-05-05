@@ -2,6 +2,7 @@ package org.upnp.alljoynservice.Device;
 
 import org.alljoyn.bus.BusException;
 import org.alljoyn.bus.annotation.BusInterface;
+import org.alljoyn.bus.annotation.BusSignal;
 //import org.alljoyn.bus.annotation.BusProperty;
 //import org.alljoyn.bus.annotation.BusSignal;
 import org.alljoyn.bus.annotation.BusMethod;
@@ -20,8 +21,11 @@ public interface DeviceInterface
 	void getStrInfo(String recvInfo) throws BusException;
 
 	@BusMethod
-	boolean getNotifyStatus();
+	boolean getNotifyStatus() throws BusException;
 
 	@BusMethod
-	boolean getRecvStatus();
+	boolean getRecvStatus() throws BusException;
+	
+    @BusSignal
+    public void sendInfoOnSignal(String str) throws BusException;
 }

@@ -38,6 +38,7 @@ public class MainActivity extends Activity
 	private Button btnTest3 = null;
 	private Button btnTest8 = null;
 	private Button btnTest9 = null;
+	private Button btnTest10 = null;
 	private String sBClient = "client";
 	private Thread mServiceThread = null;
 	private EndPtService localService = null;
@@ -195,6 +196,35 @@ public class MainActivity extends Activity
 					// TODO Auto-generated catch block
 					e.printStackTrace();
 				}
+
+			}
+		});
+		
+		btnTest10 = (Button) findViewById(R.id.button10);
+		btnTest10.setOnClickListener(new View.OnClickListener()
+		{
+
+			@Override
+			public void onClick(View v)
+			{
+				// TODO Auto-generated method stub
+				if (sp.getBoolean(sBClient, true))
+				{
+					String info = null;
+					info = localService.mSigHandler.getInfoFromSignal();
+					Toast.makeText(getApplicationContext(), info,
+							Toast.LENGTH_LONG).show();
+					return;
+				}
+				
+				String sNLoop = mLoopNumEdit.getText().toString();
+				boolean ans = localService.sendOverSignal(sNLoop);
+				if (!ans)
+				{
+					Toast.makeText(getApplicationContext(), "sendOverSignal fail@",
+							Toast.LENGTH_LONG).show();					
+				}
+				
 
 			}
 		});

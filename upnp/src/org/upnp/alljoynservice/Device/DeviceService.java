@@ -3,6 +3,7 @@ package org.upnp.alljoynservice.Device;
 import org.alljoyn.bus.BusException;
 import org.alljoyn.bus.BusObject;
 import org.alljoyn.bus.annotation.BusMethod;
+import org.alljoyn.bus.annotation.BusSignal;
 
 public class DeviceService implements DeviceInterface, BusObject
 {
@@ -76,6 +77,14 @@ public class DeviceService implements DeviceInterface, BusObject
 		// last mGetStr = ""
 		mIsRecv = false;
 		return mGetStr;
+	}
+
+	@Override
+	@BusSignal
+	public void sendInfoOnSignal(String str) throws BusException
+	{
+		// TODO Auto-generated method stub
+		
 	}
 
 }

@@ -1,17 +1,21 @@
 package org.upnp.alljoynservice.end;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 
 import org.alljoyn.bus.BusAttachment;
+import org.alljoyn.bus.BusException;
 import org.alljoyn.bus.BusListener;
 import org.alljoyn.bus.Mutable;
 import org.alljoyn.bus.ProxyBusObject;
 import org.alljoyn.bus.SessionListener;
 import org.alljoyn.bus.SessionOpts;
 import org.alljoyn.bus.SessionPortListener;
+import org.alljoyn.bus.SignalEmitter;
 import org.alljoyn.bus.Status;
+
 import org.upnp.alljoynservice.Device.DeviceInterface;
 import org.upnp.alljoynservice.Device.DeviceService;
 
@@ -68,6 +72,8 @@ public class EndPtService extends Service implements ServiceConfig
 
 	private ProxyBusObject mProxyObj = null;
 
+	private DeviceInterface mSignalInterface = null; // for service
+	public AjBusSignalHandler mSigHandler = null; // for client
 	// private AlljoynSessionListener mSessionListener = null;
 
 	// for monitoring clientlist
@@ -160,6 +166,112 @@ public class EndPtService extends Service implements ServiceConfig
 				Log.i(TAG, "error happen, key:" + key + " remove " + s
 						+ " fail");
 		}
+	}
+
+	/**
+	 * 
+	 * @Title: sendOverSignal
+	 * @Description: communication by bus signal
+	 * @param @param str
+	 * @return boolean
+	 * @throws
+	 */
+	public boolean sendOverSignal(String str)
+	{
+		if (null == mSignalInterface)
+		{
+			Log.e(TAG, "mSignalInterface is null");
+			return false;
+		}
+
+		try
+		{
+			mSignalInterface.sendInfoOnSignal(str);
+		}
+		catch (BusException e)
+		{
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * 
+	 * @Title: registerSignalHandlers
+	 * @Description: TODO
+	 * @param @return
+	 * @return boolean
+	 * @throws
+	 */
+	private boolean registerSignalHandlers()
+	{
+		Status status;
+		Method handleMethod = null;
+		try
+		{
+			handleMethod = AjBusSignalHandler.class.getDeclaredMethod(
+					"handleBusSignal", new Class<?>[] { String.class });
+		}
+		catch (NoSuchMethodException e)
+		{
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+			Log.e(TAG, "handleBusSignal not found");
+			return false;
+		}
+
+		if (null != handleMethod)
+		{
+			status = mBus.registerSignalHandler(AjBusSignalHandler.iFaceName,
+					AjBusSignalHandler.sendStrSigName, mSigHandler,
+					handleMethod);
+
+			if (status != Status.OK)
+			{
+				Log.e(TAG, "registerSignalHandlers fail!:" + status.toString());
+				return false;
+			}
+			else
+			{
+				Log.i(TAG, "registerSignalHandlers succ");
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * 
+	 * @Title: unregisterSignalHandlers
+	 * @Description: TODO
+	 * @param @return
+	 * @return boolean
+	 * @throws
+	 */
+	private boolean unregisterSignalHandlers()
+	{
+
+		Method handleMethod = null;
+		try
+		{
+			handleMethod = AjBusSignalHandler.class.getDeclaredMethod(
+					"handleBusSignal", new Class<?>[] { String.class });
+		}
+		catch (NoSuchMethodException e)
+		{
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+			Log.e(TAG, "handleBusSignal not found");
+			return false;
+		}
+
+		mBus.unregisterSignalHandler(mSigHandler, handleMethod);
+
+		return true;
 	}
 
 	public void setAcceptStatus(boolean status)
@@ -281,17 +393,21 @@ public class EndPtService extends Service implements ServiceConfig
 			//
 			synchronized (EndPtService.this)
 			{
-				//sessionid need be casted to long type, else containskey return false
-				//fuck java!
-				boolean bExist = mClientList.containsKey((long)sessionId);
+				// sessionid need be casted to long type, else containskey
+				// return false
+				// fuck java!
+				boolean bExist = mClientList.containsKey((long) sessionId);
 				if (bExist)
 				{
-					ArrayList<String> joinerList = mClientList.get((long)sessionId);
+					ArrayList<String> joinerList = mClientList
+							.get((long) sessionId);
 					joinerList.clear();
 
-					mClientList.remove((long)sessionId);
-					
+					mClientList.remove((long) sessionId);
+
 					mAwareLosSess = true;
+
+					mSignalInterface = null;
 
 					logStatus(
 							String.format(
@@ -300,7 +416,8 @@ public class EndPtService extends Service implements ServiceConfig
 				}
 				else
 				{
-					Log.e(TAG, "happen exception error, not exist sessionid "+sessionId);
+					Log.e(TAG, "happen exception error, not exist sessionid "
+							+ sessionId);
 				}
 			}
 		}
@@ -505,7 +622,7 @@ public class EndPtService extends Service implements ServiceConfig
 
 		mBus.registerBusListener(mBusListener);
 
-		if (ServiceRole.SERVER_END == mRole)
+		if (ServiceRole.SERVER_END == mRole || ServiceRole.CLIENT_END == mRole)
 		{
 
 			if (null == mDev)
@@ -538,6 +655,18 @@ public class EndPtService extends Service implements ServiceConfig
 
 		mIsConnected = true;
 
+		// signalhandler
+		if (ServiceRole.CLIENT_END == mRole)
+		{
+			if (null == mSigHandler)
+			{
+				mSigHandler = new AjBusSignalHandler();
+			}
+
+			// register
+			registerSignalHandlers();
+		}
+
 		if (ServiceRole.CLIENT_END == mRole)// ugly
 		{
 			status = mBus.findAdvertisedName(mServiceName);
@@ -545,6 +674,11 @@ public class EndPtService extends Service implements ServiceConfig
 					status);
 			if (Status.OK != status)
 			{
+
+				// unregister
+				unregisterSignalHandlers();
+
+				mBus.unregisterBusObject(mDev);
 
 				mBus.unregisterBusListener(mBusListener);
 				mBus.disconnect();
@@ -607,7 +741,24 @@ public class EndPtService extends Service implements ServiceConfig
 								String.format(
 										"BusListener.sessionJoined(%d, %d, %s): on RAW_PORT",
 										sessionPort, sessionId, joiner));
+
 						mSessionId = sessionId;
+
+						// in fact, endptservice only support one session with
+						// multipoints
+						// so, we don't check sessionid value is same as
+						// mSessionId(old)
+						// and admit mSignalInterface never with different
+						// sessionid by default
+						if (null == mSignalInterface)
+						{
+							// future, custom joiner?
+							SignalEmitter emitter = new SignalEmitter(mDev,
+									mSessionId,
+									SignalEmitter.GlobalBroadcast.Off);
+							mSignalInterface = emitter
+									.getInterface(DeviceInterface.class);
+						}
 						//
 						putAdd((long) mSessionId, joiner);
 
@@ -684,12 +835,19 @@ public class EndPtService extends Service implements ServiceConfig
 			mBus.cancelAdvertiseName(mSerGUIDName, SessionOpts.TRANSPORT_ANY);
 			mBus.releaseName(mSerGUIDName);
 			mBus.unbindSessionPort(mServicePort);
+
+			mSignalInterface = null;
 		}
 
 		mBus.unregisterBusListener(mBusListener);
 
-		if (ServiceRole.SERVER_END == mRole)// ugly
+		if (ServiceRole.SERVER_END == mRole || ServiceRole.CLIENT_END == mRole)// ugly
 			mBus.unregisterBusObject(mDev);
+
+		if (ServiceRole.CLIENT_END == mRole)
+		{
+			unregisterSignalHandlers();
+		}
 
 		if (ServiceRole.CLIENT_END == mRole && mIsjoinSession)// ugly
 		{
