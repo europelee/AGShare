@@ -84,7 +84,15 @@ public class DeviceService implements DeviceInterface, BusObject
 	public void sendInfoOnSignal(String str) throws BusException
 	{
 		// TODO Auto-generated method stub
-		
+
+	}
+
+	@Override
+	@BusSignal
+	public void sendBytesOnSignal(Byte[] data) throws BusException
+	{
+		// TODO Auto-generated method stub
+
 	}
 
 }

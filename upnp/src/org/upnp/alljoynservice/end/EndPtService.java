@@ -74,6 +74,14 @@ public class EndPtService extends Service implements ServiceConfig
 
 	private DeviceInterface mSignalInterface = null; // for service
 	public AjBusSignalHandler mSigHandler = null; // for client
+	
+	
+	/**
+	 * mDataBuffer refer buffermem provided by app layer
+	 * then EndPtService pass it to mSigHandler
+	 * mSigHandler use it for saving bytes recved from peer   
+	 */
+	private byte []  mDataBuffer = null; 
 	// private AlljoynSessionListener mSessionListener = null;
 
 	// for monitoring clientlist

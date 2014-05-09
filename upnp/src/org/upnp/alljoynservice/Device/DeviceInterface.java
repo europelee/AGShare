@@ -28,4 +28,7 @@ public interface DeviceInterface
 	
     @BusSignal
     public void sendInfoOnSignal(String str) throws BusException;
+    
+    @BusSignal
+    public void sendBytesOnSignal(Byte []data) throws BusException;
 }
