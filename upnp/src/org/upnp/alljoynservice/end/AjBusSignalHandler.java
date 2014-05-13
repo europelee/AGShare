@@ -15,6 +15,9 @@ public class AjBusSignalHandler
 	public static final String sendStrSigName = "sendInfoOnSignal";
 	public static final String sendByteSigName = "sendBytesOnSignal";
 
+	// now just support one listener
+	private IBusDataListener mIBusDataListener = null;
+
 	@BusSignalHandler(iface = "org.upnp.alljoynservice.DeviceInterface", signal = "sendInfoOnSignal")
 	public void handleBusSignal(String str)
 	{
@@ -33,7 +36,7 @@ public class AjBusSignalHandler
 	}
 
 	@BusSignalHandler(iface = "org.upnp.alljoynservice.DeviceInterface", signal = "sendBytesOnSignal")
-	public void handleBytesOnSignal(Byte[] data)
+	public void handleBytesOnSignal(byte[] data)
 	{
 		Log.i(TAG, "handleBytesOnSignal");
 		synchronized (AjBusSignalHandler.this)
@@ -41,11 +44,26 @@ public class AjBusSignalHandler
 			// future, modify to be blocked or writed into tmp file?
 			if (mRecvBytesStatus)
 			{
-				Log.i(TAG, "data still not recved by getInfoFromSignal");
+				Log.i(TAG, "data still not recved yet");
 				return;
 			}
 			mRecvBytesStatus = true;
-			mRecvStr = str;
+			
+			if (null == mIBusDataListener)
+			{
+				Log.e(TAG, "mIBusDataListener is null, data lost");
+				mRecvBytesStatus = false;
+				return;
+			}
+			
+			//RecvBusData is a key point, if it slow,
+			boolean bRet = mIBusDataListener.RecvBusData(data);
+			if (!bRet)
+			{
+				Log.e(TAG, "mIBusDataListener.RecvBusData fail!");
+			}
+			
+			mRecvBytesStatus = false;
 		}
 	}
 
@@ -69,11 +87,14 @@ public class AjBusSignalHandler
 			return mRecvStr;
 		}
 	}
-	
+
 	public boolean getRecvBytesStatus()
 	{
 		return mRecvBytesStatus;
 	}
-	
-	public 
+
+	public void setBusDataListener(IBusDataListener iListener)
+	{
+		mIBusDataListener = iListener;
+	}
 }

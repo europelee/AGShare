@@ -1,5 +1,6 @@
 package com.example.testupnp;
 
+import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -39,6 +40,7 @@ public class MainActivity extends Activity
 	private Button btnTest8 = null;
 	private Button btnTest9 = null;
 	private Button btnTest10 = null;
+	private Button btnTest11 = null;
 	private String sBClient = "client";
 	private Thread mServiceThread = null;
 	private EndPtService localService = null;
@@ -47,7 +49,7 @@ public class MainActivity extends Activity
 	ComponentName mRunningService = null;
 	private boolean bSetupSession = false;
 	// private EndPtService mEndPtS = null;
-
+	private String testBytes	= "";
 	static
 	{
 
@@ -55,6 +57,33 @@ public class MainActivity extends Activity
 		System.loadLibrary("alljoyn_java");
 	}
 
+	private class TestListener implements IBusDataListener
+	{
+
+		@Override
+		public boolean RecvBusData(byte[] arg0)
+		{
+			// TODO Auto-generated method stub
+			String bystr ="";
+			try
+			{
+				bystr = new String(arg0, "US-ASCII");
+			}
+			catch (UnsupportedEncodingException e)
+			{
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			
+			Log.i(TAG, ":"+bystr);
+			testBytes = bystr;
+			return true;
+		}
+		
+	};
+	
+	private TestListener mTestListener = new TestListener();
+	
 	private ServiceConnection mConnection = new ServiceConnection()
 	{
 		public void onServiceConnected(ComponentName className,
@@ -228,6 +257,60 @@ public class MainActivity extends Activity
 
 			}
 		});
+		
+		btnTest11 = (Button) findViewById(R.id.button11);
+		btnTest11.setOnClickListener(new View.OnClickListener()
+		{
+
+			@Override
+			public void onClick(View v)
+			{
+				// TODO Auto-generated method stub
+				if (sp.getBoolean(sBClient, true))
+				{
+										
+					Toast.makeText(getApplicationContext(), testBytes,
+							Toast.LENGTH_LONG).show();
+					testBytes = "";
+					return;
+				}
+				
+				String sNLoop = mLoopNumEdit.getText().toString();
+				byte[] tmp = null;
+				try
+				{
+					tmp = sNLoop.getBytes("US-ASCII");
+				}
+				catch (UnsupportedEncodingException e)
+				{
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+				/*
+				String bystr ="";
+				try
+				{
+					bystr = new String(tmp, "US-ASCII");
+				}
+				catch (UnsupportedEncodingException e)
+				{
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+				
+				Log.i(TAG, sNLoop+":"+bystr);
+				*/
+				
+				boolean ans = localService.sendOverSignal(tmp);
+				if (!ans)
+				{
+					Toast.makeText(getApplicationContext(), "sendOverSignal_bytes fail@",
+							Toast.LENGTH_LONG).show();					
+				}
+				
+				 
+			}
+		});
 	}
 
 	@Override
@@ -369,6 +452,7 @@ public class MainActivity extends Activity
 						{
 							bSetupSession = true;
 							Log.i(TAG, "activity get succ session");
+							localService.setBusDataListener(mTestListener);
 							handler.sendEmptyMessage(1);
 						}
 					}
@@ -377,6 +461,7 @@ public class MainActivity extends Activity
 						if (bSetupSession)
 						{
 							Log.i(TAG, "activity lost session");
+							localService.setBusDataListener(null);
 							handler.sendEmptyMessage(2);
 						}
 						bSetupSession = false;

@@ -5,3 +5,9 @@ upnp/bin
 TestUPnP/gen
 TestUPnP/bin
 TestUPnP/libs/upnp.jar
+GstreamerUtil/gen
+GstreamerUtil/bin
+GstreamerUtil/gst-build
+GstreamerUtil/obj
+GstreamerUtil/libs/armeabi
+

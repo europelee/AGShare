@@ -87,12 +87,13 @@ public class DeviceService implements DeviceInterface, BusObject
 
 	}
 
+
 	@Override
 	@BusSignal
-	public void sendBytesOnSignal(Byte[] data) throws BusException
+	public void sendBytesOnSignal(byte[] data) throws BusException
 	{
 		// TODO Auto-generated method stub
-
+		
 	}
 
 }

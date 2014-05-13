@@ -74,14 +74,12 @@ public class EndPtService extends Service implements ServiceConfig
 
 	private DeviceInterface mSignalInterface = null; // for service
 	public AjBusSignalHandler mSigHandler = null; // for client
-	
-	
+
 	/**
-	 * mDataBuffer refer buffermem provided by app layer
-	 * then EndPtService pass it to mSigHandler
-	 * mSigHandler use it for saving bytes recved from peer   
+	 * mDataBuffer refer buffermem provided by app layer then EndPtService pass
+	 * it to mSigHandler mSigHandler use it for saving bytes recved from peer
 	 */
-	private byte []  mDataBuffer = null; 
+	// private byte[] mDataBuffer = null;
 	// private AlljoynSessionListener mSessionListener = null;
 
 	// for monitoring clientlist
@@ -206,22 +204,49 @@ public class EndPtService extends Service implements ServiceConfig
 		return true;
 	}
 
+	public boolean sendOverSignal(byte[] data)
+	{
+		if (null == mSignalInterface)
+		{
+			Log.e(TAG, "mSignalInterface is null");
+			return false;
+		}
+
+		try
+		{
+			mSignalInterface.sendBytesOnSignal(data);
+		}
+		catch (BusException e)
+		{
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+			return false;
+		}
+
+		return true;
+	}
+
 	/**
 	 * 
-	 * @Title: registerSignalHandlers
+	 * @Title: registerSignalHandlersHelper
 	 * @Description: TODO
+	 * @param @param handlerName
+	 * @param @param ifName
+	 * @param @param sigName
+	 * @param @param arg1
 	 * @param @return
 	 * @return boolean
 	 * @throws
 	 */
-	private boolean registerSignalHandlers()
+	private boolean registerSignalHandlersHelper(String handlerName,
+			String ifName, String sigName, Class<?>... arg1)
 	{
 		Status status;
 		Method handleMethod = null;
 		try
 		{
 			handleMethod = AjBusSignalHandler.class.getDeclaredMethod(
-					"handleBusSignal", new Class<?>[] { String.class });
+					handlerName, arg1);
 		}
 		catch (NoSuchMethodException e)
 		{
@@ -233,8 +258,7 @@ public class EndPtService extends Service implements ServiceConfig
 
 		if (null != handleMethod)
 		{
-			status = mBus.registerSignalHandler(AjBusSignalHandler.iFaceName,
-					AjBusSignalHandler.sendStrSigName, mSigHandler,
+			status = mBus.registerSignalHandler(ifName, sigName, mSigHandler,
 					handleMethod);
 
 			if (status != Status.OK)
@@ -254,20 +278,46 @@ public class EndPtService extends Service implements ServiceConfig
 
 	/**
 	 * 
-	 * @Title: unregisterSignalHandlers
+	 * @Title: registerSignalHandlers
 	 * @Description: TODO
 	 * @param @return
 	 * @return boolean
 	 * @throws
 	 */
-	private boolean unregisterSignalHandlers()
+	private boolean registerSignalHandlers()
 	{
 
+		registerSignalHandlersHelper("handleBusSignal",
+				AjBusSignalHandler.iFaceName,
+				AjBusSignalHandler.sendStrSigName,
+				new Class<?>[] { String.class });
+
+		registerSignalHandlersHelper("handleBytesOnSignal",
+				AjBusSignalHandler.iFaceName,
+				AjBusSignalHandler.sendByteSigName,
+				new Class<?>[] { byte[].class });
+
+		return true;
+	}
+
+	/**
+	 * 
+	* @Title: unregisterSignalHandlersHelper 
+	* @Description: TODO
+	* @param @param handlerName
+	* @param @param arg1
+	* @param @return
+	* @return boolean
+	* @throws
+	 */
+	private boolean unregisterSignalHandlersHelper(String handlerName,
+			Class<?>... arg1)
+	{
 		Method handleMethod = null;
 		try
 		{
 			handleMethod = AjBusSignalHandler.class.getDeclaredMethod(
-					"handleBusSignal", new Class<?>[] { String.class });
+					handlerName, arg1);
 		}
 		catch (NoSuchMethodException e)
 		{
@@ -280,6 +330,24 @@ public class EndPtService extends Service implements ServiceConfig
 		mBus.unregisterSignalHandler(mSigHandler, handleMethod);
 
 		return true;
+	}
+
+	/**
+	 * 
+	 * @Title: unregisterSignalHandlers
+	 * @Description: TODO
+	 * @param @return
+	 * @return boolean
+	 * @throws
+	 */
+	private boolean unregisterSignalHandlers()
+	{
+		unregisterSignalHandlersHelper("handleBusSignal",
+				new Class<?>[] { String.class });
+		unregisterSignalHandlersHelper("handleBytesOnSignal",
+				new Class<?>[] { byte[].class });
+		return true;
+
 	}
 
 	public void setAcceptStatus(boolean status)
@@ -942,5 +1010,25 @@ public class EndPtService extends Service implements ServiceConfig
 		}
 
 		return true;
+	}
+
+	/**
+	 * 
+	 * @Title: setBusDataListener
+	 * @Description: pass iBusListener to AjBusSignalHandler
+	 * @param @param iBusListener
+	 * @return void
+	 * @throws
+	 */
+	public void setBusDataListener(IBusDataListener iBusListener)
+	{
+		if (null != mSigHandler)
+		{
+			mSigHandler.setBusDataListener(iBusListener);
+		}
+		else
+		{
+			Log.i(TAG, "setBusDataListener fail: mSigHandler null");
+		}
 	}
 }

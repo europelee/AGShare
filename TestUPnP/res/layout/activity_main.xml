@@ -45,7 +45,13 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="TestSignal" />
-                
+        
+         <Button
+            android:id="@+id/button11"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="TestSignal_bytes" />    
+                       
          <EditText
        android:id="@+id/editLoopNum"
        android:layout_width="wrap_content"
