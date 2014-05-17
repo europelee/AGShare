@@ -268,6 +268,9 @@ static void eos_cb(GstBus *bus, GstMessage *msg, CustomData *data) {
 /* Main method for the native code. This is executed on its own thread. */
 static void *app_function(void *userdata) {
 
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
+			"app_function start");
+
 	if (-1 == out_fd) {
 		/*打开FIFO*/
 		out_fd = open(PIPE_PATH, O_RDONLY);
@@ -329,7 +332,7 @@ static void *app_function(void *userdata) {
 	check_initialization_complete(data);
 
 	/* Start playing the pipeline */
-	gst_element_set_state(data->pipeline, GST_STATE_PLAYING);
+	//gst_element_set_state(data->pipeline, GST_STATE_PLAYING);
 
 	g_main_loop_run(data->main_loop);
 
@@ -395,6 +398,7 @@ static void gst_native_init(JNIEnv* env, jobject thiz) {
 	 or the pipe is closed by all processes that had the pipe open for writing.
 	 *
 	 */
+	g_print("in_fd : %d", in_fd);
 	if (-1 == in_fd) {
 		/*打开FIFO*/
 		in_fd = open(PIPE_PATH, O_WRONLY);
@@ -402,16 +406,30 @@ static void gst_native_init(JNIEnv* env, jobject thiz) {
 			g_print("open %s error, errno:%d", PIPE_PATH, errno);
 			return;
 		}
+		else
+		{
+			g_print("in_fd : %d", in_fd);
+		}
 	}
 
+	g_print("GetObjectClass thiz test...");
+	jclass clazz;
+	clazz  = (*env)->GetObjectClass(env, thiz);
+	jfieldID testid = (*env)->GetFieldID(env, clazz, "native_custom_data",
+				"J");
+	if (!testid)
+		g_print("thiz, native_custom_data not match");
+
+	g_print("new CustomData start");
 	CustomData *data = g_new0(CustomData, 1);
+	g_print("new CustomData end");
 	SET_CUSTOM_DATA(env, thiz, custom_data_field_id, data);
 	GST_DEBUG_CATEGORY_INIT(debug_category, "gstreamerutil", 0, "gsutil");
 	gst_debug_set_threshold_for_name("gstreamerutil", GST_LEVEL_DEBUG);
-	GST_DEBUG("Created CustomData at %p", data);
+	g_print("Created CustomData at %p", data);
 
 	data->app = (*env)->NewGlobalRef(env, thiz);
-	GST_DEBUG("Created GlobalRef for app object at %p", data->app);
+	g_print("Created GlobalRef for app object at %p", data->app);
 
 	pthread_create(&gst_app_thread, NULL, &app_function, data);
 }

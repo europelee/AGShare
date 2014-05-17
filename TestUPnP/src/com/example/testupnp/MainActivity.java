@@ -1,5 +1,12 @@
 package com.example.testupnp;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -8,8 +15,13 @@ import java.util.Iterator;
 import org.alljoyn.bus.BusException;
 
 import org.upnp.alljoynservice.end.*;
+import org.upnp.gstreamerutil.GstMsgListener;
+import org.upnp.gstreamerutil.GstUtilNative;
+
+import com.gstreamer.GStreamer;
 
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -28,9 +40,10 @@ import android.view.Menu;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.TextView;
 import android.widget.Toast;
 
-public class MainActivity extends Activity
+public class MainActivity extends Activity implements GstMsgListener
 {
 
 	private static final String TAG = "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%";
@@ -41,6 +54,7 @@ public class MainActivity extends Activity
 	private Button btnTest9 = null;
 	private Button btnTest10 = null;
 	private Button btnTest11 = null;
+	private Button btnTest12 = null;
 	private String sBClient = "client";
 	private Thread mServiceThread = null;
 	private EndPtService localService = null;
@@ -49,10 +63,15 @@ public class MainActivity extends Activity
 	ComponentName mRunningService = null;
 	private boolean bSetupSession = false;
 	// private EndPtService mEndPtS = null;
-	private String testBytes	= "";
+	private String testBytes = "";
+
+	private GstUtilNative mGstNative = new GstUtilNative();
+	private Thread mCThread = null;
+	private String filePath = "";
 	static
 	{
-
+		System.loadLibrary("gstreamer_android");
+		System.loadLibrary("gsutil");
 		Log.i(TAG, "System.loadLibrary(\"alljoyn_java\")");
 		System.loadLibrary("alljoyn_java");
 	}
@@ -63,27 +82,24 @@ public class MainActivity extends Activity
 		@Override
 		public boolean RecvBusData(byte[] arg0)
 		{
-			// TODO Auto-generated method stub
-			String bystr ="";
-			try
-			{
-				bystr = new String(arg0, "US-ASCII");
-			}
-			catch (UnsupportedEncodingException e)
-			{
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
-			
-			Log.i(TAG, ":"+bystr);
-			testBytes = bystr;
+			Log.i(TAG, "RecvBusData");
+			/*
+			 * // TODO Auto-generated method stub String bystr =""; try { bystr
+			 * = new String(arg0, "US-ASCII"); } catch
+			 * (UnsupportedEncodingException e) { // TODO Auto-generated catch
+			 * block e.printStackTrace(); }
+			 * 
+			 * Log.i(TAG, ":"+bystr); testBytes = bystr; return true;
+			 */
+			Log.i(TAG, "bytes len:" + arg0.length);
+			mGstNative.inject2Pipe(arg0);
 			return true;
 		}
-		
+
 	};
-	
+
 	private TestListener mTestListener = new TestListener();
-	
+
 	private ServiceConnection mConnection = new ServiceConnection()
 	{
 		public void onServiceConnected(ComponentName className,
@@ -138,6 +154,16 @@ public class MainActivity extends Activity
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.activity_main);
 
+		try
+		{
+			GStreamer.init(this);
+		}
+		catch (Exception e1)
+		{
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
+		
 		mIsBound = false;
 		// 获取SharedPreferences对象
 		Context ctx = MainActivity.this;
@@ -228,7 +254,7 @@ public class MainActivity extends Activity
 
 			}
 		});
-		
+
 		btnTest10 = (Button) findViewById(R.id.button10);
 		btnTest10.setOnClickListener(new View.OnClickListener()
 		{
@@ -245,16 +271,33 @@ public class MainActivity extends Activity
 							Toast.LENGTH_LONG).show();
 					return;
 				}
-				
+
 				String sNLoop = mLoopNumEdit.getText().toString();
 				boolean ans = localService.sendOverSignal(sNLoop);
 				if (!ans)
 				{
-					Toast.makeText(getApplicationContext(), "sendOverSignal fail@",
-							Toast.LENGTH_LONG).show();					
+					Toast.makeText(getApplicationContext(),
+							"sendOverSignal fail@", Toast.LENGTH_LONG).show();
 				}
-				
 
+			}
+		});
+
+		btnTest12 = (Button) findViewById(R.id.button12);
+		btnTest12.setOnClickListener(new View.OnClickListener()
+		{
+
+			@Override
+			public void onClick(View v)
+			{
+				// TODO Auto-generated method stub
+				if (sp.getBoolean(sBClient, true))
+				{
+					// gst
+					mGstNative.setGstMsgListener(MainActivity.this);
+					mGstNative.InitGstreamer();
+					return;
+				}
 			}
 		});
 		
@@ -268,49 +311,158 @@ public class MainActivity extends Activity
 				// TODO Auto-generated method stub
 				if (sp.getBoolean(sBClient, true))
 				{
-										
-					Toast.makeText(getApplicationContext(), testBytes,
-							Toast.LENGTH_LONG).show();
-					testBytes = "";
+					/*
+					 * Toast.makeText(getApplicationContext(), testBytes,
+					 * Toast.LENGTH_LONG).show(); testBytes = "";
+					 */
+					mGstNative.play();
 					return;
 				}
-				
-				String sNLoop = mLoopNumEdit.getText().toString();
-				byte[] tmp = null;
-				try
-				{
-					tmp = sNLoop.getBytes("US-ASCII");
-				}
-				catch (UnsupportedEncodingException e)
-				{
-					// TODO Auto-generated catch block
-					e.printStackTrace();
-				}
+
 				/*
-				String bystr ="";
-				try
+				 * String sNLoop = mLoopNumEdit.getText().toString(); byte[] tmp
+				 * = null; try { tmp = sNLoop.getBytes("US-ASCII"); } catch
+				 * (UnsupportedEncodingException e) { // TODO Auto-generated
+				 * catch block e.printStackTrace(); }
+				 * 
+				 * boolean ans = localService.sendOverSignal(tmp); if (!ans) {
+				 * Toast.makeText(getApplicationContext(),
+				 * "sendOverSignal_bytes fail@", Toast.LENGTH_LONG).show(); }
+				 */
+				// read mp3 file
+				String fileName = mLoopNumEdit.getText().toString();
+				String prePath = Environment.getExternalStorageDirectory()
+						.getAbsolutePath();
+				filePath = prePath + "/" + fileName;
+				mCThread = new Thread(new Runnable()
 				{
-					bystr = new String(tmp, "US-ASCII");
-				}
-				catch (UnsupportedEncodingException e)
-				{
-					// TODO Auto-generated catch block
-					e.printStackTrace();
-				}
-				
-				Log.i(TAG, sNLoop+":"+bystr);
-				*/
-				
-				boolean ans = localService.sendOverSignal(tmp);
-				if (!ans)
-				{
-					Toast.makeText(getApplicationContext(), "sendOverSignal_bytes fail@",
-							Toast.LENGTH_LONG).show();					
-				}
-				
-				 
+					public void run()
+					{
+
+						Looper.myLooper().prepare();
+						boolean ans = doSendRaw(filePath);
+						if (!ans)
+						{
+							Log.e(TAG, "doSendRaw fail!");
+						}
+					}
+				}, "sender");
+
+				mCThread.start();
 			}
 		});
+
+
+	}
+
+	public static byte[] subBytes(byte[] src, int begin, int count)
+	{
+		byte[] bs = new byte[count];
+		for (int i = begin; i < begin + count; i++)
+			bs[i - begin] = src[i];
+		return bs;
+	}
+
+	private boolean doSendRaw(String fileName)
+	{
+		Log.d(TAG, fileName);
+
+		File file = new File(fileName);
+
+		if (false == file.exists())
+		{
+			return false;
+		}
+		else
+		{
+			InputStream in = null;
+			try
+			{
+				in = new FileInputStream(file);
+			}
+			catch (FileNotFoundException e)
+			{
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			byte[] refMsg = new byte[204800];// 魔术数
+			int len = 0;
+
+			int nChunk = 102400;
+			while (true)
+			{
+				try
+				{
+					len = in.read(refMsg, 0, refMsg.length);
+
+					Log.i(TAG, "len:" + len);
+					if (len < 0)
+					{
+
+						Log.i(TAG, "finish writing!");
+						break;
+					}
+
+				}
+				catch (Exception ex)
+				{
+					Log.d(TAG, ex.toString() + ex.getClass().getName());
+					ex.printStackTrace();
+					break;
+				}
+
+				try
+				{
+
+					int nloop = len / nChunk;
+					int left = len % nChunk;
+					int i = 0;
+					boolean ans = true;
+					for (i = 0; i < nloop; ++i)
+					{
+						byte[] subBt = subBytes(refMsg, i * nChunk, nChunk);
+						ans = localService.sendOverSignal(subBt);
+						if (!ans)
+						{
+							Log.e(TAG, "sendOverSignal fail!");
+						}
+					}
+					if (0 < left)
+					{
+						byte[] subBt = subBytes(refMsg, i * nChunk, left);
+						ans = localService.sendOverSignal(subBt);
+					}
+
+					if (!ans)
+					{
+						Log.e(TAG, "sendOverSignal fail!");
+					}
+				}
+				catch (Exception ex)
+				{
+					StringWriter writer = new StringWriter();
+					ex.printStackTrace(new PrintWriter(writer));
+					Log.d(TAG, writer.getBuffer().toString());
+
+					break;
+
+				}
+
+			}
+
+			try
+			{
+				in.close();
+			}
+			catch (IOException e)
+			{
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			Log.i(TAG, "finish writing!");
+		}
+
+		return true;
 	}
 
 	@Override
@@ -389,6 +541,10 @@ public class MainActivity extends Activity
 		if (mIsBound)
 			unbindService(mConnection);
 		mIsBound = false;
+		
+		if (sp.getBoolean(sBClient, true))
+		mGstNative.FinGstreamer();
+
 		super.onDestroy();
 
 		// notifyObservers(APPLICATION_QUIT_EVENT);
@@ -403,7 +559,7 @@ public class MainActivity extends Activity
 	private boolean isServiceRunning()
 	{
 
-		//Log.i(TAG, "service name:" + EndPtService.class.getName());
+		// Log.i(TAG, "service name:" + EndPtService.class.getName());
 		ActivityManager manager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
 		for (RunningServiceInfo service : manager
 				.getRunningServices(Integer.MAX_VALUE))
@@ -470,20 +626,20 @@ public class MainActivity extends Activity
 						{
 							HashMap<Long, ArrayList<String>> tmpList = localService
 									.getClientList();
-							
-							for (Iterator<Long> keyIt = tmpList.keySet().iterator(); keyIt
-									.hasNext();)
+
+							for (Iterator<Long> keyIt = tmpList.keySet()
+									.iterator(); keyIt.hasNext();)
 							{
 								Object key = keyIt.next();
 
 								ArrayList<String> nameList = tmpList.get(key);
-								
-								Log.i(TAG, "sessionid: "+(Long)key);
+
+								Log.i(TAG, "sessionid: " + (Long) key);
 
 								int lSize = nameList.size();
 								for (int i = 0; i < lSize; ++i)
 								{
-									Log.i(TAG, "name: "+nameList.get(i));
+									Log.i(TAG, "name: " + nameList.get(i));
 								}
 							}
 						}
@@ -513,7 +669,7 @@ public class MainActivity extends Activity
 					catch (Exception ee)
 					{
 					}
-					
+
 					if (!mIsBound)
 					{
 						Log.i(TAG, "service not active!");
@@ -522,7 +678,7 @@ public class MainActivity extends Activity
 
 						Looper.myLooper().quit();
 
-						break;						
+						break;
 					}
 				}
 
@@ -532,5 +688,31 @@ public class MainActivity extends Activity
 			Log.i(TAG, "Looper quit!");
 		}
 
+	}
+
+	@Override
+	public void CheckGstreamerInited()
+	{
+		// TODO Auto-generated method stub
+		Log.i(TAG, "Gst initialized. Restoring state, playing:");
+		// Restore previous playing state
+
+		// Re-enable buttons, now that GStreamer is initialized
+
+	}
+
+	@Override
+	public void RecvGstMsg(String arg0)
+	{
+		// TODO Auto-generated method stub
+		final String tmp = arg0;
+		final TextView tv = (TextView) this.findViewById(R.id.textview_message);
+		runOnUiThread(new Runnable()
+		{
+			public void run()
+			{
+				tv.setText(tmp);
+			}
+		});
 	}
 }

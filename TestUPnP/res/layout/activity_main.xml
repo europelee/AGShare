@@ -20,7 +20,12 @@
         android:layout_height="wrap_content"
         android:text="@string/hello_world" />
 
-
+    <TextView
+        android:id="@+id/textview_message"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+       
+        android:gravity="center_horizontal" />
  
       <Button
             android:id="@+id/button7"
@@ -50,8 +55,12 @@
             android:id="@+id/button11"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="TestSignal_bytes" />    
-                       
+            android:text="TestSignal_bytes_orplay" />    
+          <Button
+            android:id="@+id/button12"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="initgstreamer" />                      
          <EditText
        android:id="@+id/editLoopNum"
        android:layout_width="wrap_content"
