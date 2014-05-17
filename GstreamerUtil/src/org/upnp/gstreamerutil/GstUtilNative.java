@@ -7,7 +7,7 @@ public class GstUtilNative
 {
 	private static final String  TAG = "GstUtilNative";
 	private GstMsgListener mGstMsgObserver = null;
-	
+	private boolean        mIsInited	   = false;
 	private native void nativeInit(); // Initialize native code, build pipeline,
 										// etc
 
@@ -49,16 +49,19 @@ public class GstUtilNative
 	 */
 	public void inject2Pipe(byte []data)
 	{
+		if (true == mIsInited)
 		nativeInputData(data);
 	}
 	
 	public void play()
 	{
+		if (true == mIsInited)		
 		nativePlay();
 	}
 	
 	public void pause()
 	{
+		if (true == mIsInited)
 		nativePause();
 	}
 	
@@ -66,11 +69,13 @@ public class GstUtilNative
 	{
 
 		nativeInit();
+		mIsInited = true;
 	}
 	
 	public void FinGstreamer()
 	{
 		nativeFinalize();
+		mIsInited = false;
 	}
 	
     // Called from native code. This sets the content of the TextView from the UI thread.
