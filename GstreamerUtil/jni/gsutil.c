@@ -3,6 +3,8 @@
 #include <android/log.h>
 #include <gst/gst.h>
 #include <pthread.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 GST_DEBUG_CATEGORY_STATIC( debug_category);
 #define GST_CAT_DEFAULT debug_category
@@ -23,8 +25,7 @@ GST_DEBUG_CATEGORY_STATIC( debug_category);
 #define SAMPLE_RATE 44100 /* Samples per second we are sending */
 
 //#define AUDIO_CAPS "audio/x-raw-int,channels=1,rate=%d,signed=(boolean)true,width=16,depth=16,endianness=BYTE_ORDER"
-
-#define AUDIO_CAPS "audio/mpeg, mpegversion=1, mpegaudioversion=1, layer=3, rate=%d, channels=1,parsed=(boolean)true"
+#define AUDIO_CAPS "audio/mpeg, mpegversion=1, mpegaudioversion=1, layer=3, rate=%d, channels=2,parsed=(boolean)true"
 
 /* Structure to contain all our information, so we can pass it to callbacks */
 typedef struct _CustomData {
@@ -45,9 +46,11 @@ static jfieldID custom_data_field_id;
 static jmethodID set_message_method_id;
 static jmethodID on_gstreamer_initialized_method_id;
 
-// Mutex instance
-static pthread_mutex_t mutex;
-
+static char PIPE_PATH[PATH_MAX] = { 0 };
+static int in_fd = -1;
+static int out_fd = -1;
+static int iEnd = 0;
+static const char * TAGSTR = "gsutil";
 /*
  * Private methods
  */
@@ -111,29 +114,35 @@ static gboolean push_data(CustomData *data) {
 	/* Create a new empty buffer */
 	buffer = gst_buffer_new_and_alloc(CHUNK_SIZE);
 
-	/* Set its timestamp and duration */
-	/*
-	 GST_BUFFER_TIMESTAMP (buffer) = gst_util_uint64_scale(data->num_samples,
-	 GST_SECOND, SAMPLE_RATE);
-	 GST_BUFFER_DURATION (buffer) = gst_util_uint64_scale(CHUNK_SIZE, GST_SECOND,
-	 SAMPLE_RATE);
-
-	 g_print("GST_BUFFER_TIMESTAMP:%llu, GST_BUFFER_DURATION:%llu",
-			GST_BUFFER_TIMESTAMP(buffer), GST_BUFFER_DURATION(buffer));
-	 */
-
 	raw = (guint8 *) GST_BUFFER_DATA(buffer);
-	//GST_BUFFER_SIZE (buffer) = CHUNK_SIZE;
 
-	if ()
-	{
-		g_print("read %d......", sRead);
-	}
-	else
-	{
-		/* we are EOS, send end-of-stream */
-		g_signal_emit_by_name(data->app_source, "end-of-stream", &ret);
-		return FALSE;
+	int nRead = 0;
+	while (nRead < CHUNK_SIZE) {
+
+		int nOnce = read(out_fd, raw + nRead, CHUNK_SIZE - nRead);
+
+		if (-1 == nOnce) {
+
+			if (errno == EINTR)
+				continue;
+			else {
+				__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+						"read %s error, errno:%d", PIPE_PATH, errno);
+				break;
+			}
+		}
+
+		if (nOnce > 0) {
+			nRead += nOnce;
+		}
+
+		//need close in_fd first
+		if (0 == nOnce) {
+			__android_log_print(ANDROID_LOG_INFO, TAGSTR,
+					"read zero, because finish inputing data and close infd");
+			iEnd = 1;
+			break;
+		}
 	}
 
 	/* Push the buffer into the appsrc */
@@ -142,25 +151,29 @@ static gboolean push_data(CustomData *data) {
 	/* Free the buffer now that we are done with it */
 	gst_buffer_unref(buffer);
 
-	if (ret != GST_FLOW_OK)
-	{
+	if (ret != GST_FLOW_OK) {
 		/* We got some error, stop sending data */
-		g_print("push_data FAIL!!!!!!!!!!!!!!!!!!!!:: %d\n", ret);
+		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+				"push-buffer fail, ret is %d", ret);
 		return FALSE;
+	}
+
+	//end-of-stream
+	if (1 == iEnd) {
+		ret = gst_app_src_end_of_stream(data->app_source);
+		if (ret == GST_FLOW_OK)
+			g_print("gst_app_src_end_of_stream succ");
 	}
 
 	return TRUE;
 }
 
 /* This signal callback triggers when appsrc needs data. Here, we add an idle handler * to the mainloop to start pushing data into the appsrc */
-static void start_feed(GstElement *source, guint size, CustomData *data)
-{
-	g_print("Start feeding\n");
+static void start_feed(GstElement *source, guint size, CustomData *data) {
 
+	g_print("Start feeding\n");
 	push_data(data);
 
-	//g_idle_add bug on android?
-	//data->sourceid = g_idle_add((GSourceFunc) push_data, data);
 }
 /* This callback triggers when appsrc has enough data and we can stop sending. * We remove the idle handler from the mainloop */
 static void stop_feed(GstElement *source, CustomData *data) {
@@ -217,7 +230,13 @@ static void state_changed_cb(GstBus *bus, GstMessage *msg, CustomData *data) {
 				gst_element_state_get_name(new_state));
 		set_ui_message(message, data);
 		g_free(message);
+	} else {
+		g_print("msg from %s, state changed to %s\n",
+				GST_OBJECT_NAME(GST_MESSAGE_SRC(msg)),
+				gst_element_state_get_name(new_state));
+
 	}
+
 }
 
 /* Check if all conditions are met to report GStreamer as initialized.
@@ -238,39 +257,31 @@ static void check_initialization_complete(CustomData *data) {
 	}
 }
 
+static void eos_cb(GstBus *bus, GstMessage *msg, CustomData *data) {
+
+	g_print("eos_cb called!");
+	gst_element_set_state(data->pipeline, GST_STATE_PAUSED);
+	g_main_loop_quit(data->main_loop);
+
+}
+
 /* Main method for the native code. This is executed on its own thread. */
 static void *app_function(void *userdata) {
 
-	//test
-
-	while (TRUE) {
-		if (0 != pthread_mutex_lock(&mutex)) {
-			g_print("pthread_mutex_lock fail!");
-		} else {
-			g_print("pthread_mutex_lock succ!");
+	if (-1 == out_fd) {
+		/*打开FIFO*/
+		out_fd = open(PIPE_PATH, O_RDONLY);
+		if (-1 == out_fd) {
+			__android_log_print(ANDROID_LOG_INFO, TAGSTR,
+					"app_function open %s error, errno:%d", PIPE_PATH, errno);
+			return;
 		}
-		sleep(60);
-		g_print("thread finish sleeping 10s");
-		// Unlock mutex
-		if (0 != pthread_mutex_unlock(&mutex)) {
-			g_print("pthread_mutex_unlock fail!");
-		} else {
-			g_print("pthread_mutex_lock succ!");
-		}
-
-		sleep(10);
-		g_print("after unlocking, thread finish sleeping 10s");
 	}
-
-	return;
 
 	//
 	JavaVMAttachArgs args;
 	GstBus *bus;
 	CustomData *data = (CustomData *) userdata;
-
-	data->b = 1; /* For waveform generation */
-	data->d = 1;
 
 	GSource *bus_source;
 	GError *error = NULL;
@@ -296,7 +307,6 @@ static void *app_function(void *userdata) {
 	g_signal_connect(data->pipeline, "source-setup", G_CALLBACK(source_setup),
 			data);
 
-
 	/* Instruct the bus to emit signals for each received message, and connect to the interesting signals */
 	bus = gst_element_get_bus(data->pipeline);
 	bus_source = gst_bus_create_watch(bus);
@@ -304,6 +314,9 @@ static void *app_function(void *userdata) {
 			NULL, NULL);
 	g_source_attach(bus_source, data->context);
 	g_source_unref(bus_source);
+
+	g_signal_connect(G_OBJECT(bus), "message::eos", (GCallback) eos_cb, data);
+
 	g_signal_connect(G_OBJECT(bus), "message::error", (GCallback) error_cb,
 			data);
 	g_signal_connect(G_OBJECT(bus), "message::state-changed",
@@ -316,8 +329,10 @@ static void *app_function(void *userdata) {
 	check_initialization_complete(data);
 
 	/* Start playing the pipeline */
-	//gst_element_set_state (data->pipeline, GST_STATE_PLAYING);
+	gst_element_set_state(data->pipeline, GST_STATE_PLAYING);
+
 	g_main_loop_run(data->main_loop);
+
 	GST_DEBUG("Exited main loop");
 	g_main_loop_unref(data->main_loop);
 	data->main_loop = NULL;
@@ -338,28 +353,63 @@ static void *app_function(void *userdata) {
 /* Instruct the native code to create its internal data structure, pipeline and thread */
 static void gst_native_init(JNIEnv* env, jobject thiz) {
 
-	// Initialize mutex
-	if (0 != pthread_mutex_init(&mutex, NULL)) {
+	jclass cls_Env = (*env)->FindClass(env, "android/os/Environment");
+	jmethodID mid_getExtStorage = (*env)->GetStaticMethodID(env, cls_Env,
+			"getExternalStorageDirectory", "()Ljava/io/File;");
+	jobject obj_File = (*env)->CallStaticObjectMethod(env, cls_Env,
+			mid_getExtStorage);
 
-		// Get the exception class
-		jclass exceptionClazz = (*env)->FindClass(env,
-				"java/lang/RuntimeException");
-		// Throw exception
-		(*env)->ThrowNew(env, exceptionClazz, "Unable to initialize mutex");
+	jclass cls_File = (*env)->FindClass(env, "java/io/File");
+	jmethodID mid_getPath = (*env)->GetMethodID(env, cls_File, "getPath",
+			"()Ljava/lang/String;");
+	jstring obj_Path = (*env)->CallObjectMethod(env, obj_File, mid_getPath);
+	const char* path = (*env)->GetStringUTFChars(env, obj_Path, 0);
 
-		g_print("pthread_mutex_init fail!");
+	snprintf(PIPE_PATH, PATH_MAX, "%s/fifo9003", path);
+
+	(*env)->ReleaseStringUTFChars(env, obj_Path, path);
+
+	g_print("pipe path:%s", PIPE_PATH);
+
+	if (-1 == access(PIPE_PATH, F_OK)) {
+		int res = mkfifo(PIPE_PATH, S_IRWXO);
+		if (res != 0) {
+			g_print("Error while creating a pipe (return:%d, errno:%d)", res,
+					errno);
+		} else {
+			g_print("create pipe %s succ!", PIPE_PATH);
+		}
 
 	} else {
+		g_print(" pipe %s EXIST!", PIPE_PATH);
+	}
 
+	//here
+	//because
+	/**
+	 * If some process has the pipe open for writing and O_NONBLOCK is set,
+	 * read() shall return -1 and set errno to [EAGAIN].
+	 *
+	 If some process has the pipe open for writing and O_NONBLOCK is clear,
+	 read() shall block the calling thread until some data is written
+	 or the pipe is closed by all processes that had the pipe open for writing.
+	 *
+	 */
+	if (-1 == in_fd) {
+		/*打开FIFO*/
+		in_fd = open(PIPE_PATH, O_WRONLY);
+		if (-1 == in_fd) {
+			g_print("open %s error, errno:%d", PIPE_PATH, errno);
+			return;
+		}
 	}
 
 	CustomData *data = g_new0(CustomData, 1);
 	SET_CUSTOM_DATA(env, thiz, custom_data_field_id, data);
-	GST_DEBUG_CATEGORY_INIT(debug_category, "gstreamerutil", 0,
-			"gsutil");
+	GST_DEBUG_CATEGORY_INIT(debug_category, "gstreamerutil", 0, "gsutil");
 	gst_debug_set_threshold_for_name("gstreamerutil", GST_LEVEL_DEBUG);
-
 	GST_DEBUG("Created CustomData at %p", data);
+
 	data->app = (*env)->NewGlobalRef(env, thiz);
 	GST_DEBUG("Created GlobalRef for app object at %p", data->app);
 
@@ -369,23 +419,23 @@ static void gst_native_init(JNIEnv* env, jobject thiz) {
 /* Quit the main loop, remove the native thread and free resources */
 static void gst_native_finalize(JNIEnv* env, jobject thiz) {
 
-	// Destory mutex
-	if (0 != pthread_mutex_destroy(&mutex)) {
-		// Get the exception class
-		jclass exceptionClazz = (*env)->FindClass(env,
-				"java/lang/RuntimeException");
-		// Throw exception
-		(*env)->ThrowNew(env, exceptionClazz, "Unable to destroy mutex");
-		g_print("pthread_mutex_destroy fail!");
-	}
+	if (-1 != in_fd)
+		close(in_fd);
+
+	if (-1 != out_fd)
+		close(out_fd);
 
 	CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
 	if (!data)
 		return;
-	GST_DEBUG("Quitting main loop...");
-	g_main_loop_quit(data->main_loop);
-	GST_DEBUG("Waiting for thread to finish...");
-	pthread_join(gst_app_thread, NULL);
+
+	if (0 == iEnd) {
+		GST_DEBUG("Quitting main loop...");
+		g_main_loop_quit(data->main_loop);
+		GST_DEBUG("Waiting for thread to finish...");
+		pthread_join(gst_app_thread, NULL);
+	}
+
 	GST_DEBUG("Deleting GlobalRef for app object at %p", data->app);
 	(*env)->DeleteGlobalRef(env, data->app);
 	GST_DEBUG("Freeing CustomData at %p", data);
@@ -404,6 +454,11 @@ static void gst_native_play(JNIEnv* env, jobject thiz) {
 	}
 	GST_DEBUG("Setting state to PLAYING");
 	g_print("data is Setting state to PLAYING!");
+
+	if (iEnd == 1) {
+		iEnd = 0;
+		pthread_create(&gst_app_thread, NULL, &app_function, data);
+	}
 
 	GstStateChangeReturn ret;
 
@@ -431,31 +486,30 @@ static void gst_native_pause(JNIEnv* env, jobject thiz) {
 	gst_element_set_state(data->pipeline, GST_STATE_PAUSED);
 }
 
-static void gst_native_test(JNIEnv* env, jobject thiz) {
-	if (0 != pthread_mutex_lock(&mutex)) {
-		// Get the exception class
-		jclass exceptionClazz = (*env)->FindClass(env,
-				"java/lang/RuntimeException");
-		// Throw exception
-		(*env)->ThrowNew(env, exceptionClazz, "Unable to lock mutex");
-		g_print("uupthread_mutex_lock fail!");
-	} else {
-		g_print("uupthread_mutex_lock succ!");
-	}
-	sleep(2);
-	g_print("uuthread finish sleeping 2s");
-	// Unlock mutex
-	if (0 != pthread_mutex_unlock(&mutex)) {
-		jclass exceptionClazz = (*env)->FindClass(env,
-				"java/lang/RuntimeException");
-		// Throw exception
-		(*env)->ThrowNew(env, exceptionClazz, "Unable to unlock mutex");
-		g_print("uupthread_mutex_unlock fail!");
-	} else {
-		g_print("uupthread_mutex_lock succ!");
+static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) {
+
+	int nArrLen = (*env)->GetArrayLength(env, jbarray);
+	unsigned char *chArr = (unsigned char *) ((*env)->GetByteArrayElements(env,
+			jbarray, 0));
+
+	int nWrite = 0;
+
+	while (nWrite < nArrLen) {
+		int n_once = write(in_fd, chArr + nWrite, nArrLen - nWrite);
+
+		if (0 == n_once) {
+			__android_log_print(ANDROID_LOG_INFO, TAGSTR, "write return zero?");
+			continue;
+		}
+		if (n_once > 0)
+			nWrite += n_once;
+		else {
+			__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+					"Could not write, errno:%d", errno);
+			break;
+		}
 	}
 
-	g_print("after unlocking, uuthread finish sleeping 10s");
 }
 
 /* Static class initializer: retrieve method and field IDs */
@@ -472,7 +526,7 @@ static jboolean gst_native_class_init(JNIEnv* env, jclass klass) {
 		/* We emit this message through the Android log instead of the GStreamer log because the later
 		 * has not been initialized yet.
 		 */
-		__android_log_print(ANDROID_LOG_ERROR, "gstreamerutil",
+		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
 				"The calling class does not implement all necessary interface methods");
 		return JNI_FALSE;
 	}
@@ -484,8 +538,8 @@ static JNINativeMethod native_methods[] = { { "nativeInit", "()V",
 		(void *) gst_native_init }, { "nativeFinalize", "()V",
 		(void *) gst_native_finalize }, { "nativePlay", "()V",
 		(void *) gst_native_play }, { "nativePause", "()V",
-		(void *) gst_native_pause }, { "nativeTest", "()V",
-		(void *) gst_native_test }, { "nativeClassInit", "()Z",
+		(void *) gst_native_pause }, { "nativeInputData", "([B)V",
+		(void *) gst_native_inputdata }, { "nativeClassInit", "()Z",
 		(void *) gst_native_class_init } };
 
 /* Library initializer */
@@ -495,7 +549,7 @@ jint JNI_OnLoad(JavaVM *vm, void *reserved) {
 	java_vm = vm;
 
 	if ((*vm)->GetEnv(vm, (void**) &env, JNI_VERSION_1_4) != JNI_OK) {
-		__android_log_print(ANDROID_LOG_ERROR, "gstreamerutil",
+		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
 				"Could not retrieve JNIEnv");
 		return 0;
 	}
