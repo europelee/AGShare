@@ -106,6 +106,12 @@ static void set_ui_message(const gchar *message, CustomData *data) {
 
 static gboolean push_data(CustomData *data) {
 
+	if (-1 == out_fd )
+	{
+		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+				"out_fd is -1");
+		return FALSE;
+	}
 	GstBuffer *buffer;
 	GstFlowReturn ret;
 
@@ -279,6 +285,11 @@ static void *app_function(void *userdata) {
 					"app_function open %s error, errno:%d", PIPE_PATH, errno);
 			return;
 		}
+		else
+		{
+			__android_log_print(ANDROID_LOG_INFO, TAGSTR,
+					"app_function open out_fd :%d", out_fd);
+		}
 	}
 
 	//
@@ -398,6 +409,30 @@ static void gst_native_init(JNIEnv* env, jobject thiz) {
 	 or the pipe is closed by all processes that had the pipe open for writing.
 	 *
 	 */
+
+
+	/*
+	g_print("GetObjectClass thiz test...");
+	jclass clazz;
+	clazz  = (*env)->GetObjectClass(env, thiz);
+	jfieldID testid = (*env)->GetFieldID(env, clazz, "native_custom_data",
+				"J");
+	if (!testid)
+		g_print("thiz, native_custom_data not match");
+	 */
+	g_print("new CustomData start");
+	CustomData *data = g_new0(CustomData, 1);
+	g_print("new CustomData end");
+	SET_CUSTOM_DATA(env, thiz, custom_data_field_id, data);
+	GST_DEBUG_CATEGORY_INIT(debug_category, "gstreamerutil", 0, "gsutil");
+	gst_debug_set_threshold_for_name("gstreamerutil", GST_LEVEL_DEBUG);
+	g_print("Created CustomData at %p", data);
+
+	data->app = (*env)->NewGlobalRef(env, thiz);
+	g_print("Created GlobalRef for app object at %p", data->app);
+
+	pthread_create(&gst_app_thread, NULL, &app_function, data);
+
 	g_print("in_fd : %d", in_fd);
 	if (-1 == in_fd) {
 		/*´ò¿ªFIFO*/
@@ -411,27 +446,6 @@ static void gst_native_init(JNIEnv* env, jobject thiz) {
 			g_print("in_fd : %d", in_fd);
 		}
 	}
-
-	g_print("GetObjectClass thiz test...");
-	jclass clazz;
-	clazz  = (*env)->GetObjectClass(env, thiz);
-	jfieldID testid = (*env)->GetFieldID(env, clazz, "native_custom_data",
-				"J");
-	if (!testid)
-		g_print("thiz, native_custom_data not match");
-
-	g_print("new CustomData start");
-	CustomData *data = g_new0(CustomData, 1);
-	g_print("new CustomData end");
-	SET_CUSTOM_DATA(env, thiz, custom_data_field_id, data);
-	GST_DEBUG_CATEGORY_INIT(debug_category, "gstreamerutil", 0, "gsutil");
-	gst_debug_set_threshold_for_name("gstreamerutil", GST_LEVEL_DEBUG);
-	g_print("Created CustomData at %p", data);
-
-	data->app = (*env)->NewGlobalRef(env, thiz);
-	g_print("Created GlobalRef for app object at %p", data->app);
-
-	pthread_create(&gst_app_thread, NULL, &app_function, data);
 }
 
 /* Quit the main loop, remove the native thread and free resources */
