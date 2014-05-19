@@ -110,23 +110,20 @@ static void set_ui_message(const gchar *message, CustomData *data) {
 	(*env)->DeleteLocalRef(env, jmessage);
 }
 
-static void closefd(int *fd, const char * fdinfo)
-{
-	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
-			"close fd %d, fdinfo:%s", *fd, fdinfo);
+static void closefd(int *fd, const char * fdinfo) {
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "close fd %d, fdinfo:%s", *fd,
+			fdinfo);
 
 	if (-1 == *fd)
 		return;
 
 	//close in_fd
-	if (*fd == in_fd)
-	{
+	if (*fd == in_fd) {
 		read_len = 0;
 		//recv_len = 0;
 	}
 
-	if (*fd == out_fd)
-	{
+	if (*fd == out_fd) {
 		out_len = 0;
 	}
 
@@ -179,20 +176,17 @@ static gboolean push_data(CustomData *data) {
 			out_len += nOnce;
 		}
 
-
-		if (out_len == recv_len)
-		{
-			__android_log_print(ANDROID_LOG_INFO, TAGSTR,
-					"finish reading");
+		if (out_len == recv_len) {
+			__android_log_print(ANDROID_LOG_INFO, TAGSTR, "finish reading");
 			closefd(&out_fd, "out_Fd");
 			iEnd = 1;
 			break;
 		}
 
-		if (out_len > recv_len)
-		{
+		if (out_len > recv_len) {
 			__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
-					"read happen unexception, out_len %d > recv_len %d", out_len, recv_len);
+					"read happen unexception, out_len %d > recv_len %d",
+					out_len, recv_len);
 			closefd(&out_fd, "out_Fd");
 			iEnd = 1;
 			break;
@@ -325,6 +319,7 @@ static void check_initialization_complete(CustomData *data) {
 static void eos_cb(GstBus *bus, GstMessage *msg, CustomData *data) {
 
 	g_print("eos_cb called!");
+	data->initialized = FALSE;
 	gst_element_set_state(data->pipeline, GST_STATE_PAUSED);
 	g_main_loop_quit(data->main_loop);
 
@@ -415,9 +410,7 @@ static void *app_function(void *userdata) {
 	return NULL;
 }
 
-
-static void init_pipeline(JNIEnv* env, jobject thiz)
-{
+static void init_pipeline(JNIEnv* env, jobject thiz) {
 	jclass cls_Env = (*env)->FindClass(env, "android/os/Environment");
 	jmethodID mid_getExtStorage = (*env)->GetStaticMethodID(env, cls_Env,
 			"getExternalStorageDirectory", "()Ljava/io/File;");
@@ -511,9 +504,9 @@ static void gst_native_finalize(JNIEnv* env, jobject thiz) {
 	closefd(&out_fd, "out_fd");
 
 	int ret = remove(PIPE_PATH);
-	if (0 != ret)
-	{
-		__android_log_print(ANDROID_LOG_ERROR, TAGSTR, "remove %s fail", PIPE_PATH);
+	if (0 != ret) {
+		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+				"remove %s fail, errno:%d", PIPE_PATH, errno);
 	}
 
 	CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
@@ -557,9 +550,9 @@ static void gst_native_play(JNIEnv* env, jobject thiz) {
 			closefd(&in_fd, "in_fd");
 			closefd(&out_fd, "out_fd");
 			int ret = remove(PIPE_PATH);
-			if (0 != ret)
-			{
-				__android_log_print(ANDROID_LOG_ERROR, TAGSTR, "remove %s fail", PIPE_PATH);
+			if (0 != ret) {
+				__android_log_print(ANDROID_LOG_ERROR, TAGSTR, "remove %s fail",
+						PIPE_PATH);
 			}
 
 			init_pipeline(env, thiz);
@@ -579,6 +572,22 @@ static void gst_native_play(JNIEnv* env, jobject thiz) {
 			}
 		}
 	}
+
+	//check pipeline is ok(it generated in another thread)
+	// then go on
+	int nLoop = 20;
+	while(FALSE == data->initialized)
+	{
+		usleep(200000);
+		nLoop--;
+		if (nLoop <= 0)
+		{
+			__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+					"inital gstreamer data timeout!");
+			break;
+		}
+	}
+
 
 	GstStateChangeReturn ret;
 
@@ -608,8 +617,7 @@ static void gst_native_pause(JNIEnv* env, jobject thiz) {
 
 static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) {
 
-	if (-1 == in_fd)
-	{
+	if (-1 == in_fd) {
 		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
 				"could not inputdata, in_fd -1");
 		return;
@@ -646,8 +654,8 @@ static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) 
 
 	if (read_len > recv_len) {
 		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
-				"happen unexpection error, readlen %d > recvlen %d",
-				read_len, recv_len);
+				"happen unexpection error, readlen %d > recvlen %d", read_len,
+				recv_len);
 
 		closefd(&in_fd, "in_fd");
 	}
@@ -688,7 +696,7 @@ static JNINativeMethod native_methods[] = { { "nativeInit", "()V",
 		(void *) gst_native_play }, { "nativePause", "()V",
 		(void *) gst_native_pause }, { "nativeInputData", "([B)V",
 		(void *) gst_native_inputdata }, { "nativeSetRecvLen", "(I)V",
-		(void *) gst_native_setrecvlen },{ "nativeClassInit", "()Z",
+		(void *) gst_native_setrecvlen }, { "nativeClassInit", "()Z",
 		(void *) gst_native_class_init } };
 
 /* Library initializer */
