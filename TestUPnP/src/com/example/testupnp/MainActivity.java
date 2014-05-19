@@ -263,6 +263,7 @@ public class MainActivity extends Activity implements GstMsgListener
 			public void onClick(View v)
 			{
 				// TODO Auto-generated method stub
+				/*
 				if (sp.getBoolean(sBClient, true))
 				{
 					String info = null;
@@ -279,7 +280,43 @@ public class MainActivity extends Activity implements GstMsgListener
 					Toast.makeText(getApplicationContext(),
 							"sendOverSignal fail@", Toast.LENGTH_LONG).show();
 				}
-
+				*/
+				
+				if (sp.getBoolean(sBClient, true))
+				{
+					String info = null;
+					info = localService.mSigHandler.getInfoFromSignal();
+					Toast.makeText(getApplicationContext(), info,
+							Toast.LENGTH_LONG).show();
+					
+					int fLen = (int) Long.parseLong(info);
+					
+					mGstNative.setRecvLen(fLen);
+					
+					return;
+				}		
+				
+				String fileName = mLoopNumEdit.getText().toString();
+				String prePath = Environment.getExternalStorageDirectory()
+						.getAbsolutePath();
+				filePath = prePath + "/" + fileName;
+				
+				//set file len
+				File tmpFile = new File(filePath);
+				long fLen = tmpFile.length();
+				String sLen = Long.toString(fLen);
+				boolean ans = localService.sendOverSignal(sLen);
+				if (!ans)
+				{
+					Toast.makeText(getApplicationContext(),
+							"sendOverSignal fail@", Toast.LENGTH_LONG).show();
+				}
+				else
+				{
+					Toast.makeText(getApplicationContext(), sLen,
+							Toast.LENGTH_LONG).show();
+				}
+				
 			}
 		});
 
@@ -334,6 +371,8 @@ public class MainActivity extends Activity implements GstMsgListener
 				String prePath = Environment.getExternalStorageDirectory()
 						.getAbsolutePath();
 				filePath = prePath + "/" + fileName;
+							
+				
 				mCThread = new Thread(new Runnable()
 				{
 					public void run()

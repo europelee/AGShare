@@ -20,12 +20,28 @@ public class GstUtilNative
 
 	private native void nativeInputData(byte [] data);
 	
+	private native void nativeSetRecvLen(int len);
+	
 	private static native boolean nativeClassInit(); // Initialize native class:
 														// cache Method IDs for
 														// callbacks
 	
 	private long native_custom_data; // Native code will use this to keep
 										// private data
+
+	/**
+	 * 
+	* @Title: setRecvLen 
+	* @Description: set audio/video file len
+	* @param @param len
+	* @return void
+	* @throws
+	 */
+	public void setRecvLen(int len)
+	{
+		nativeSetRecvLen(len);
+	}
+	
 	/**
 	 * 
 	* @Title: setGstMsgListener 

@@ -51,6 +51,12 @@ static int in_fd = -1;
 static int out_fd = -1;
 static int iEnd = 0;
 static const char * TAGSTR = "gsutil";
+
+static int read_len = 0; //i.e inputdata
+static int recv_len = 0;
+
+static int out_len = 0; //i.e read from out_Fd
+
 /*
  * Private methods
  */
@@ -104,12 +110,42 @@ static void set_ui_message(const gchar *message, CustomData *data) {
 	(*env)->DeleteLocalRef(env, jmessage);
 }
 
+static void closefd(int *fd, const char * fdinfo)
+{
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
+			"close fd %d, fdinfo:%s", *fd, fdinfo);
+
+	if (-1 == *fd)
+		return;
+
+	//close in_fd
+	if (*fd == in_fd)
+	{
+		read_len = 0;
+		//recv_len = 0;
+	}
+
+	if (*fd == out_fd)
+	{
+		out_len = 0;
+	}
+
+	int ret = 0;
+	if (-1 != *fd) {
+		ret = close(*fd);
+		if (0 != ret) {
+			__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+					"close(in_fd) fail, errno:%d", errno);
+		} else {
+			*fd = -1;
+		}
+	}
+}
+
 static gboolean push_data(CustomData *data) {
 
-	if (-1 == out_fd )
-	{
-		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
-				"out_fd is -1");
+	if (-1 == out_fd) {
+		__android_log_print(ANDROID_LOG_ERROR, TAGSTR, "out_fd is -1");
 		return FALSE;
 	}
 	GstBuffer *buffer;
@@ -138,17 +174,40 @@ static gboolean push_data(CustomData *data) {
 			}
 		}
 
-		if (nOnce > 0) {
+		if (nOnce >= 0) {
 			nRead += nOnce;
+			out_len += nOnce;
 		}
 
+
+		if (out_len == recv_len)
+		{
+			__android_log_print(ANDROID_LOG_INFO, TAGSTR,
+					"finish reading");
+			closefd(&out_fd, "out_Fd");
+			iEnd = 1;
+			break;
+		}
+
+		if (out_len > recv_len)
+		{
+			__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+					"read happen unexception, out_len %d > recv_len %d", out_len, recv_len);
+			closefd(&out_fd, "out_Fd");
+			iEnd = 1;
+			break;
+		}
 		//need close in_fd first
+		//return nOnce zero is normal, even if open for reading is on block mode
+		// only first read operator would be blocked!
+#if 0
 		if (0 == nOnce) {
 			__android_log_print(ANDROID_LOG_INFO, TAGSTR,
 					"read zero, because finish inputing data and close infd");
 			iEnd = 1;
 			break;
 		}
+#endif
 	}
 
 	/* Push the buffer into the appsrc */
@@ -274,8 +333,7 @@ static void eos_cb(GstBus *bus, GstMessage *msg, CustomData *data) {
 /* Main method for the native code. This is executed on its own thread. */
 static void *app_function(void *userdata) {
 
-	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
-			"app_function start");
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "app_function start");
 
 	if (-1 == out_fd) {
 		/*打开FIFO*/
@@ -284,9 +342,7 @@ static void *app_function(void *userdata) {
 			__android_log_print(ANDROID_LOG_INFO, TAGSTR,
 					"app_function open %s error, errno:%d", PIPE_PATH, errno);
 			return;
-		}
-		else
-		{
+		} else {
 			__android_log_print(ANDROID_LOG_INFO, TAGSTR,
 					"app_function open out_fd :%d", out_fd);
 		}
@@ -344,7 +400,6 @@ static void *app_function(void *userdata) {
 
 	/* Start playing the pipeline */
 	//gst_element_set_state(data->pipeline, GST_STATE_PLAYING);
-
 	g_main_loop_run(data->main_loop);
 
 	GST_DEBUG("Exited main loop");
@@ -360,13 +415,9 @@ static void *app_function(void *userdata) {
 	return NULL;
 }
 
-/*
- * Java Bindings
- */
 
-/* Instruct the native code to create its internal data structure, pipeline and thread */
-static void gst_native_init(JNIEnv* env, jobject thiz) {
-
+static void init_pipeline(JNIEnv* env, jobject thiz)
+{
 	jclass cls_Env = (*env)->FindClass(env, "android/os/Environment");
 	jmethodID mid_getExtStorage = (*env)->GetStaticMethodID(env, cls_Env,
 			"getExternalStorageDirectory", "()Ljava/io/File;");
@@ -398,28 +449,17 @@ static void gst_native_init(JNIEnv* env, jobject thiz) {
 		g_print(" pipe %s EXIST!", PIPE_PATH);
 	}
 
-	//here
-	//because
-	/**
-	 * If some process has the pipe open for writing and O_NONBLOCK is set,
-	 * read() shall return -1 and set errno to [EAGAIN].
-	 *
-	 If some process has the pipe open for writing and O_NONBLOCK is clear,
-	 read() shall block the calling thread until some data is written
-	 or the pipe is closed by all processes that had the pipe open for writing.
-	 *
-	 */
+}
 
+/*
+ * Java Bindings
+ */
 
-	/*
-	g_print("GetObjectClass thiz test...");
-	jclass clazz;
-	clazz  = (*env)->GetObjectClass(env, thiz);
-	jfieldID testid = (*env)->GetFieldID(env, clazz, "native_custom_data",
-				"J");
-	if (!testid)
-		g_print("thiz, native_custom_data not match");
-	 */
+/* Instruct the native code to create its internal data structure, pipeline and thread */
+static void gst_native_init(JNIEnv* env, jobject thiz) {
+
+	init_pipeline(env, thiz);
+
 	g_print("new CustomData start");
 	CustomData *data = g_new0(CustomData, 1);
 	g_print("new CustomData end");
@@ -433,6 +473,24 @@ static void gst_native_init(JNIEnv* env, jobject thiz) {
 
 	pthread_create(&gst_app_thread, NULL, &app_function, data);
 
+	//here
+	//because
+	/**
+	 * If some process has the pipe open for writing and O_NONBLOCK is set,
+	 * read() shall return -1 and set errno to [EAGAIN].
+	 *
+	 If some process has the pipe open for writing and O_NONBLOCK is clear,
+	 read() shall block the calling thread until some data is written
+	 or the pipe is closed by all processes that had the pipe open for writing.
+	 *
+	 *
+	 *open function also have the above feature, i.e open for reading and open
+	 *for writing on pipe must both called,  at least one called in another thread
+	 *, if not, open would be blocked!
+	 *
+	 *
+	 *so here, we need pthread_create... called first!
+	 */
 	g_print("in_fd : %d", in_fd);
 	if (-1 == in_fd) {
 		/*打开FIFO*/
@@ -440,9 +498,7 @@ static void gst_native_init(JNIEnv* env, jobject thiz) {
 		if (-1 == in_fd) {
 			g_print("open %s error, errno:%d", PIPE_PATH, errno);
 			return;
-		}
-		else
-		{
+		} else {
 			g_print("in_fd : %d", in_fd);
 		}
 	}
@@ -451,11 +507,14 @@ static void gst_native_init(JNIEnv* env, jobject thiz) {
 /* Quit the main loop, remove the native thread and free resources */
 static void gst_native_finalize(JNIEnv* env, jobject thiz) {
 
-	if (-1 != in_fd)
-		close(in_fd);
+	closefd(&in_fd, "in_fd");
+	closefd(&out_fd, "out_fd");
 
-	if (-1 != out_fd)
-		close(out_fd);
+	int ret = remove(PIPE_PATH);
+	if (0 != ret)
+	{
+		__android_log_print(ANDROID_LOG_ERROR, TAGSTR, "remove %s fail", PIPE_PATH);
+	}
 
 	CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
 	if (!data)
@@ -488,8 +547,37 @@ static void gst_native_play(JNIEnv* env, jobject thiz) {
 	g_print("data is Setting state to PLAYING!");
 
 	if (iEnd == 1) {
+
 		iEnd = 0;
+		//check pipleline
+		//if (-1 == in_fd || -1 == out_fd)
+
+		//processing unexception
+		{
+			closefd(&in_fd, "in_fd");
+			closefd(&out_fd, "out_fd");
+			int ret = remove(PIPE_PATH);
+			if (0 != ret)
+			{
+				__android_log_print(ANDROID_LOG_ERROR, TAGSTR, "remove %s fail", PIPE_PATH);
+			}
+
+			init_pipeline(env, thiz);
+		}
+
 		pthread_create(&gst_app_thread, NULL, &app_function, data);
+
+		g_print("in_fd : %d", in_fd);
+		if (-1 == in_fd) {
+			/*打开FIFO*/
+			in_fd = open(PIPE_PATH, O_WRONLY);
+			if (-1 == in_fd) {
+				g_print("open %s error, errno:%d", PIPE_PATH, errno);
+				return;
+			} else {
+				g_print("in_fd : %d", in_fd);
+			}
+		}
 	}
 
 	GstStateChangeReturn ret;
@@ -520,6 +608,13 @@ static void gst_native_pause(JNIEnv* env, jobject thiz) {
 
 static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) {
 
+	if (-1 == in_fd)
+	{
+		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+				"could not inputdata, in_fd -1");
+		return;
+	}
+
 	int nArrLen = (*env)->GetArrayLength(env, jbarray);
 	unsigned char *chArr = (unsigned char *) ((*env)->GetByteArrayElements(env,
 			jbarray, 0));
@@ -542,6 +637,27 @@ static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) 
 		}
 	}
 
+	//
+	read_len += nWrite;
+
+	if (read_len == recv_len) {
+		closefd(&in_fd, "in_fd");
+	}
+
+	if (read_len > recv_len) {
+		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+				"happen unexpection error, readlen %d > recvlen %d",
+				read_len, recv_len);
+
+		closefd(&in_fd, "in_fd");
+	}
+
+}
+
+static void gst_native_setrecvlen(JNIEnv* env, jobject thiz, jint jlen) {
+	recv_len = jlen;
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "play byteslen :%d",
+			recv_len);
 }
 
 /* Static class initializer: retrieve method and field IDs */
@@ -571,7 +687,8 @@ static JNINativeMethod native_methods[] = { { "nativeInit", "()V",
 		(void *) gst_native_finalize }, { "nativePlay", "()V",
 		(void *) gst_native_play }, { "nativePause", "()V",
 		(void *) gst_native_pause }, { "nativeInputData", "([B)V",
-		(void *) gst_native_inputdata }, { "nativeClassInit", "()Z",
+		(void *) gst_native_inputdata }, { "nativeSetRecvLen", "(I)V",
+		(void *) gst_native_setrecvlen },{ "nativeClassInit", "()Z",
 		(void *) gst_native_class_init } };
 
 /* Library initializer */
