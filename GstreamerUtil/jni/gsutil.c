@@ -21,11 +21,8 @@ GST_DEBUG_CATEGORY_STATIC( debug_category);
 # define SET_CUSTOM_DATA(env, thiz, fieldID, data) (*env)->SetLongField (env, thiz, fieldID, (jlong)(jint)data)
 #endif
 
-#define CHUNK_SIZE 1024   /* Amount of bytes we are sending in each buffer */
+#define CHUNK_SIZE  1024   /* Amount of bytes we are sending in each buffer */
 #define SAMPLE_RATE 44100 /* Samples per second we are sending */
-
-//#define AUDIO_CAPS "audio/x-raw-int,channels=1,rate=%d,signed=(boolean)true,width=16,depth=16,endianness=BYTE_ORDER"
-#define AUDIO_CAPS "audio/mpeg, mpegversion=1, mpegaudioversion=1, layer=3, rate=%d, channels=2,parsed=(boolean)true"
 
 /* Structure to contain all our information, so we can pass it to callbacks */
 typedef struct _CustomData {
@@ -156,6 +153,11 @@ static gboolean push_data(CustomData *data) {
 	raw = (guint8 *) GST_BUFFER_DATA(buffer);
 
 	int nRead = 0;
+#if 0
+	time_t begin = time(NULL);
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
+			"begin time is  %ld", begin);
+#endif
 	while (nRead < CHUNK_SIZE) {
 
 		int nOnce = read(out_fd, raw + nRead, CHUNK_SIZE - nRead);
@@ -203,7 +205,14 @@ static gboolean push_data(CustomData *data) {
 		}
 #endif
 	}
+#if 0
+	time_t end = time(NULL);
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
+			"end time is  %ld", end);
 
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
+			"end-begin is  %ld", (long)end-(long)begin);
+#endif
 	/* Push the buffer into the appsrc */
 	g_signal_emit_by_name(data->app_source, "push-buffer", buffer, &ret);
 
@@ -230,7 +239,7 @@ static gboolean push_data(CustomData *data) {
 /* This signal callback triggers when appsrc needs data. Here, we add an idle handler * to the mainloop to start pushing data into the appsrc */
 static void start_feed(GstElement *source, guint size, CustomData *data) {
 
-	g_print("Start feeding\n");
+	//g_print("Start feeding\n");
 	push_data(data);
 
 }
@@ -245,17 +254,19 @@ static void stop_feed(GstElement *source, CustomData *data) {
 static void source_setup(GstElement *pipeline, GstElement *source,
 		CustomData *data) {
 
-	gchar *audio_caps_text;
-	GstCaps *audio_caps;
+
 	g_print("Source has been created. Configuring.\n");
 	data->app_source = source; /* Configure appsrc */
-	audio_caps_text = g_strdup_printf(AUDIO_CAPS, SAMPLE_RATE);
-	audio_caps = gst_caps_from_string(audio_caps_text);
-	g_object_set(source, "caps", audio_caps, NULL);
+
+	//any means any
+	GstCaps * gany;
+	gany = gst_caps_new_any();
+	g_object_set(source, "caps", gany, NULL);
+	gst_caps_unref(gany);
+
 	g_signal_connect(source, "need-data", G_CALLBACK(start_feed), data);
 	g_signal_connect(source, "enough-data", G_CALLBACK(stop_feed), data);
-	gst_caps_unref(audio_caps);
-	g_free(audio_caps_text);
+
 }
 
 /* Retrieve errors from the bus and show them on the UI */
@@ -442,6 +453,8 @@ static void init_pipeline(JNIEnv* env, jobject thiz) {
 		g_print(" pipe %s EXIST!", PIPE_PATH);
 	}
 
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
+			"PIPE_BUF: %d", PIPE_BUF);
 }
 
 /*
@@ -500,15 +513,6 @@ static void gst_native_init(JNIEnv* env, jobject thiz) {
 /* Quit the main loop, remove the native thread and free resources */
 static void gst_native_finalize(JNIEnv* env, jobject thiz) {
 
-	closefd(&in_fd, "in_fd");
-	closefd(&out_fd, "out_fd");
-
-	int ret = remove(PIPE_PATH);
-	if (0 != ret) {
-		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
-				"remove %s fail, errno:%d", PIPE_PATH, errno);
-	}
-
 	CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
 	if (!data)
 		return;
@@ -518,6 +522,18 @@ static void gst_native_finalize(JNIEnv* env, jobject thiz) {
 		g_main_loop_quit(data->main_loop);
 		GST_DEBUG("Waiting for thread to finish...");
 		pthread_join(gst_app_thread, NULL);
+
+		iEnd = 1;
+	}
+
+	//anothread may use fd, so join it first
+	closefd(&in_fd, "in_fd");
+	closefd(&out_fd, "out_fd");
+
+	int ret = remove(PIPE_PATH);
+	if (0 != ret) {
+		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+				"remove %s fail, errno:%d", PIPE_PATH, errno);
 	}
 
 	GST_DEBUG("Deleting GlobalRef for app object at %p", data->app);
@@ -629,6 +645,10 @@ static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) 
 
 	int nWrite = 0;
 
+	time_t begin = time(NULL);
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
+			"begin time is  %ld", begin);
+
 	while (nWrite < nArrLen) {
 		int n_once = write(in_fd, chArr + nWrite, nArrLen - nWrite);
 
@@ -645,6 +665,13 @@ static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) 
 		}
 	}
 
+	time_t end = time(NULL);
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
+			"end time is  %ld", end);
+
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
+			"end-begin is  %ld", (long)end-(long)begin);
+
 	//
 	read_len += nWrite;
 
@@ -660,6 +687,7 @@ static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) 
 		closefd(&in_fd, "in_fd");
 	}
 
+	(*env)->ReleaseByteArrayElements(env, jbarray, chArr, 0);
 }
 
 static void gst_native_setrecvlen(JNIEnv* env, jobject thiz, jint jlen) {

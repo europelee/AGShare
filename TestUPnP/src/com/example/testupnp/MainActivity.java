@@ -55,6 +55,7 @@ public class MainActivity extends Activity implements GstMsgListener
 	private Button btnTest10 = null;
 	private Button btnTest11 = null;
 	private Button btnTest12 = null;
+	private Button btnTest13 = null;
 	private String sBClient = "client";
 	private Thread mServiceThread = null;
 	private EndPtService localService = null;
@@ -300,9 +301,18 @@ public class MainActivity extends Activity implements GstMsgListener
 				String prePath = Environment.getExternalStorageDirectory()
 						.getAbsolutePath();
 				filePath = prePath + "/" + fileName;
+
+				Toast.makeText(getApplicationContext(), filePath,
+						Toast.LENGTH_LONG).show();
 				
 				//set file len
 				File tmpFile = new File(filePath);
+				if (false == tmpFile.exists())
+				{
+					Toast.makeText(getApplicationContext(), "file not exist!",
+							Toast.LENGTH_LONG).show();					
+				}
+				
 				long fLen = tmpFile.length();
 				String sLen = Long.toString(fLen);
 				boolean ans = localService.sendOverSignal(sLen);
@@ -335,6 +345,19 @@ public class MainActivity extends Activity implements GstMsgListener
 					mGstNative.InitGstreamer();
 					return;
 				}
+			}
+		});
+		
+		btnTest13 = (Button) findViewById(R.id.button13);
+		btnTest13.setOnClickListener(new View.OnClickListener()
+		{
+
+			@Override
+			public void onClick(View v)
+			{
+				// TODO Auto-generated method stub
+				if (sp.getBoolean(sBClient, true))
+					mGstNative.FinGstreamer();
 			}
 		});
 		
