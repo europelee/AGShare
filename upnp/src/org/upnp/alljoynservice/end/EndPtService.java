@@ -983,11 +983,16 @@ public class EndPtService extends Service implements ServiceConfig
 		logStatus("BusAttachment.joinSession() - sessionId: " + sessionId.value
 				+ " name:" + name, status);
 
-		if (Status.OK != status)
+		if (Status.OK != status && Status.ALLJOYN_JOINSESSION_REPLY_ALREADY_JOINED != status)
 		{
 			return false;
 		}
 
+		if (Status.ALLJOYN_JOINSESSION_REPLY_ALREADY_JOINED == status)
+		{
+			mIsjoinSession = true;
+			return true;
+		}
 		// mServiceName a prefix name, while name : mServiceName+guid
 		mProxyObj = mBus.getProxyBusObject(name, mBusObjPath, sessionId.value,
 				new Class<?>[] { DeviceInterface.class });
