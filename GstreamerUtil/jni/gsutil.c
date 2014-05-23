@@ -5,6 +5,9 @@
 #include <pthread.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <unistd.h>
+#include<sys/types.h>
+#include <sys/mman.h>
 
 GST_DEBUG_CATEGORY_STATIC( debug_category);
 #define GST_CAT_DEFAULT debug_category
@@ -21,8 +24,7 @@ GST_DEBUG_CATEGORY_STATIC( debug_category);
 # define SET_CUSTOM_DATA(env, thiz, fieldID, data) (*env)->SetLongField (env, thiz, fieldID, (jlong)(jint)data)
 #endif
 
-#define CHUNK_SIZE  1024   /* Amount of bytes we are sending in each buffer */
-#define SAMPLE_RATE 44100 /* Samples per second we are sending */
+#define CHUNK_SIZE  102400   /* Amount of bytes we are sending in each buffer */
 
 /* Structure to contain all our information, so we can pass it to callbacks */
 typedef struct _CustomData {
@@ -43,16 +45,21 @@ static jfieldID custom_data_field_id;
 static jmethodID set_message_method_id;
 static jmethodID on_gstreamer_initialized_method_id;
 
-static char PIPE_PATH[PATH_MAX] = { 0 };
-static int in_fd = -1;
-static int out_fd = -1;
-static int iEnd = 0;
+static int iEnd = 1;
 static const char * TAGSTR = "gsutil";
 
-static int read_len = 0; //i.e inputdata
-static int recv_len = 0;
+static char SHM_FILE[PATH_MAX] = { 0 };
 
-static int out_len = 0; //i.e read from out_Fd
+static unsigned char *head_maped = NULL;
+
+//mean max file length 4G
+static unsigned long recv_len = 0;
+
+static unsigned long in_index = 0; //next input index
+static unsigned long out_index = 0;
+
+// Mutex instance
+static pthread_mutex_t * pmutex = NULL;
 
 /*
  * Private methods
@@ -114,16 +121,6 @@ static void closefd(int *fd, const char * fdinfo) {
 	if (-1 == *fd)
 		return;
 
-	//close in_fd
-	if (*fd == in_fd) {
-		read_len = 0;
-		//recv_len = 0;
-	}
-
-	if (*fd == out_fd) {
-		out_len = 0;
-	}
-
 	int ret = 0;
 	if (-1 != *fd) {
 		ret = close(*fd);
@@ -136,12 +133,49 @@ static void closefd(int *fd, const char * fdinfo) {
 	}
 }
 
+static void fin_shmfile() {
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "fin_shmfile start: ");
+
+	/**
+	 * The munmap() system call deletes the mappings for the specified address range,
+	 and causes further references to addresses within the range to
+	 generate invalid memory references. The region is also automatically
+	 unmapped when the process is terminated. On the other hand,
+	 closing the file descriptor does not unmap the region
+	 */
+	if ((NULL != head_maped)
+			&& ((munmap((void *) head_maped, recv_len)) == -1)) {
+		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+				"error munmap SHM_FILE: %d", errno);
+		perror("munmap");
+	}
+
+	head_maped = NULL;
+
+	if (0 == access(SHM_FILE, F_OK)) {
+		int ret = remove(SHM_FILE);
+		if (0 != ret) {
+			__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+					"remove %s fail, errno:%d", SHM_FILE, errno);
+		}
+	} else {
+		__android_log_print(ANDROID_LOG_INFO, TAGSTR, "%s not exist!",
+				SHM_FILE);
+	}
+}
+
 static gboolean push_data(CustomData *data) {
 
-	if (-1 == out_fd) {
-		__android_log_print(ANDROID_LOG_ERROR, TAGSTR, "out_fd is -1");
+	g_print("gsutil:push_data enter");
+
+	//avoiding pushing data again when finish but enter eos_cb not yet
+	if (out_index >= recv_len)
+	{
+		__android_log_print(ANDROID_LOG_INFO, TAGSTR,
+				"already finish playing");
 		return FALSE;
 	}
+
 	GstBuffer *buffer;
 	GstFlowReturn ret;
 
@@ -158,53 +192,84 @@ static gboolean push_data(CustomData *data) {
 	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
 			"begin time is  %ld", begin);
 #endif
-	while (nRead < CHUNK_SIZE) {
 
-		int nOnce = read(out_fd, raw + nRead, CHUNK_SIZE - nRead);
 
-		if (-1 == nOnce) {
+	if (out_index + CHUNK_SIZE > recv_len) {
+		memcpy(raw, head_maped + out_index, recv_len - out_index);
+		out_index = recv_len;
+	} else {
+		int nLoop = 60;
+		while (1) {
+			if (NULL != pmutex) {
+				if (0 != pthread_mutex_lock(pmutex)) {
+					g_print("uupthread_mutex_lock fail!");
+				} else {
+					g_print("uupthread_mutex_lock succ!");
+				}
+			} else {
+				g_print("pmutex is null!");
+			}
 
-			if (errno == EINTR)
-				continue;
-			else {
-				__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
-						"read %s error, errno:%d", PIPE_PATH, errno);
+			if (out_index + CHUNK_SIZE > in_index) {
+
+				if (NULL != pmutex) {
+					if (0 != pthread_mutex_unlock(pmutex)) {
+						g_print("uupthread_mutex_UNlock fail!");
+					} else {
+						g_print("uupthread_mutex_UNlock succ!");
+					}
+				} else {
+					g_print("pmutex is null!");
+				}
+
+				__android_log_print(ANDROID_LOG_INFO, TAGSTR,
+						"buff readable is empty!");
+
+				usleep(100000);
+				nLoop--;
+				if (nLoop <= 0) {
+					__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+							"get CHUNK_SIZE data  timeout after 6s!");
+
+					gst_buffer_unref(buffer);
+
+					return FALSE;
+				}
+				else
+				{
+					continue;
+				}
+				//return FALSE;
+			}
+			else
+			{
 				break;
 			}
+
+		}//while
+
+		if (NULL != pmutex) {
+			if (0 != pthread_mutex_unlock(pmutex)) {
+				g_print("uupthread_mutex_UNlock fail!");
+			} else {
+				g_print("uupthread_mutex_UNlock succ!");
+			}
+		} else {
+			g_print("pmutex is null!");
 		}
 
-		if (nOnce >= 0) {
-			nRead += nOnce;
-			out_len += nOnce;
-		}
 
-		if (out_len == recv_len) {
-			__android_log_print(ANDROID_LOG_INFO, TAGSTR, "finish reading");
-			closefd(&out_fd, "out_Fd");
-			iEnd = 1;
-			break;
-		}
+		memcpy(raw, head_maped + out_index, CHUNK_SIZE);
 
-		if (out_len > recv_len) {
-			__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
-					"read happen unexception, out_len %d > recv_len %d",
-					out_len, recv_len);
-			closefd(&out_fd, "out_Fd");
-			iEnd = 1;
-			break;
-		}
-		//need close in_fd first
-		//return nOnce zero is normal, even if open for reading is on block mode
-		// only first read operator would be blocked!
-#if 0
-		if (0 == nOnce) {
-			__android_log_print(ANDROID_LOG_INFO, TAGSTR,
-					"read zero, because finish inputing data and close infd");
-			iEnd = 1;
-			break;
-		}
-#endif
+		out_index += CHUNK_SIZE;
 	}
+
+	if (out_index == recv_len) {
+		__android_log_print(ANDROID_LOG_INFO, TAGSTR, "finish reading");
+
+		iEnd = 1;
+	}
+
 #if 0
 	time_t end = time(NULL);
 	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
@@ -253,7 +318,6 @@ static void stop_feed(GstElement *source, CustomData *data) {
 /* This function is called when playbin2 has created the appsrc element, so we have * a chance to configure it. */
 static void source_setup(GstElement *pipeline, GstElement *source,
 		CustomData *data) {
-
 
 	g_print("Source has been created. Configuring.\n");
 	data->app_source = source; /* Configure appsrc */
@@ -330,6 +394,7 @@ static void check_initialization_complete(CustomData *data) {
 static void eos_cb(GstBus *bus, GstMessage *msg, CustomData *data) {
 
 	g_print("eos_cb called!");
+
 	data->initialized = FALSE;
 	gst_element_set_state(data->pipeline, GST_STATE_PAUSED);
 	g_main_loop_quit(data->main_loop);
@@ -341,17 +406,24 @@ static void *app_function(void *userdata) {
 
 	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "app_function start");
 
-	if (-1 == out_fd) {
-		/*打开FIFO*/
-		out_fd = open(PIPE_PATH, O_RDONLY);
-		if (-1 == out_fd) {
-			__android_log_print(ANDROID_LOG_INFO, TAGSTR,
-					"app_function open %s error, errno:%d", PIPE_PATH, errno);
-			return;
-		} else {
-			__android_log_print(ANDROID_LOG_INFO, TAGSTR,
-					"app_function open out_fd :%d", out_fd);
-		}
+	in_index = 0;
+	out_index = 0;
+
+	// Initialize mutex
+	//it need this thread start first before alljoyn calling input data
+	if (NULL != pmutex) {
+		free(pmutex);
+		pmutex = NULL;
+	}
+
+	pmutex = (pthread_mutex_t *) malloc(sizeof(pthread_mutex_t));
+
+	if (0 != pthread_mutex_init(pmutex, NULL)) {
+
+		g_print("pthread_mutex_init fail!");
+
+	} else {
+		g_print("pthread_mutex_init succ!");
 	}
 
 	//
@@ -377,6 +449,19 @@ static void *app_function(void *userdata) {
 		g_clear_error(&error);
 		set_ui_message(message, data);
 		g_free(message);
+
+		// Destory mutex
+		if ((NULL != pmutex) && (0 != pthread_mutex_destroy(pmutex))) {
+			g_print("pthread_mutex_destroy fail!");
+		} else {
+			g_print("pthread_mutex_destroy succ!");
+		}
+
+		if (NULL != pmutex) {
+			free(pmutex);
+			pmutex = NULL;
+		}
+
 		return NULL;
 	}
 
@@ -418,10 +503,38 @@ static void *app_function(void *userdata) {
 	gst_element_set_state(data->pipeline, GST_STATE_NULL);
 	gst_object_unref(data->pipeline);
 
+	fin_shmfile();
+
+	// Destory mutex
+	if ((NULL != pmutex) && (0 != pthread_mutex_destroy(pmutex))) {
+		g_print("pthread_mutex_destroy fail!");
+	} else {
+		g_print("pthread_mutex_destroy succ!");
+	}
+
+	if (NULL != pmutex) {
+		free(pmutex);
+		pmutex = NULL;
+	}
+
+	in_index = 0;
+	out_index = 0;
+
 	return NULL;
 }
 
-static void init_pipeline(JNIEnv* env, jobject thiz) {
+/**
+ *init_shmfile
+ *return true: create file succ, and get  head_mapped
+ */
+static gboolean init_shmfile(JNIEnv* env) {
+
+	if (0UL == recv_len) {
+		__android_log_print(ANDROID_LOG_ERROR, TAGSTR, "recv_len: %lu, ",
+				recv_len);
+		return FALSE;
+	}
+
 	jclass cls_Env = (*env)->FindClass(env, "android/os/Environment");
 	jmethodID mid_getExtStorage = (*env)->GetStaticMethodID(env, cls_Env,
 			"getExternalStorageDirectory", "()Ljava/io/File;");
@@ -434,27 +547,59 @@ static void init_pipeline(JNIEnv* env, jobject thiz) {
 	jstring obj_Path = (*env)->CallObjectMethod(env, obj_File, mid_getPath);
 	const char* path = (*env)->GetStringUTFChars(env, obj_Path, 0);
 
-	snprintf(PIPE_PATH, PATH_MAX, "%s/fifo9003", path);
+	snprintf(SHM_FILE, PATH_MAX, "%s/media_shm", path);
 
 	(*env)->ReleaseStringUTFChars(env, obj_Path, path);
 
-	g_print("pipe path:%s", PIPE_PATH);
+	g_print("SHM_FILE path:%s", SHM_FILE);
 
-	if (-1 == access(PIPE_PATH, F_OK)) {
-		int res = mkfifo(PIPE_PATH, S_IRWXO);
-		if (res != 0) {
-			g_print("Error while creating a pipe (return:%d, errno:%d)", res,
+	int fd = -1;
+	//O_EXCL for exclude case: another process/thread still open and do some job
+	if ((fd = open(SHM_FILE, O_RDWR | O_CREAT | O_EXCL)) == -1) {
+		if (errno != EEXIST) {
+			__android_log_print(ANDROID_LOG_ERROR, TAGSTR, "open fail: %d",
 					errno);
+			return FALSE;
 		} else {
-			g_print("create pipe %s succ!", PIPE_PATH);
+			__android_log_print(ANDROID_LOG_INFO, TAGSTR, "file %s exist!",
+					SHM_FILE);
+			int ret = remove(SHM_FILE);
+			if (0 != ret) {
+				__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+						"remove %s fail, errno:%d", SHM_FILE, errno);
+				return FALSE;
+			} else {
+				fd = open(SHM_FILE, O_RDWR | O_CREAT | O_EXCL);
+				if (-1 == fd) {
+					__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+							"open fail again!: %d ", errno);
+					return FALSE;
+				}
+			}
 		}
-
-	} else {
-		g_print(" pipe %s EXIST!", PIPE_PATH);
 	}
 
-	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
-			"PIPE_BUF: %d", PIPE_BUF);
+	if (ftruncate(fd, recv_len) == -1) {
+		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+				"error truncate the file: %d", errno);
+
+		close(fd);
+
+		return FALSE;
+	}
+
+	head_maped = mmap(0, recv_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+
+	if (head_maped == MAP_FAILED || head_maped == NULL) {
+		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+				"error mmap SHM_FILE: %d", errno);
+		perror("mmap");
+		close(fd);
+		return FALSE;
+	} else {
+		__android_log_print(ANDROID_LOG_INFO, TAGSTR, "mmap succ!");
+	}
+	return TRUE;
 }
 
 /*
@@ -463,8 +608,6 @@ static void init_pipeline(JNIEnv* env, jobject thiz) {
 
 /* Instruct the native code to create its internal data structure, pipeline and thread */
 static void gst_native_init(JNIEnv* env, jobject thiz) {
-
-	init_pipeline(env, thiz);
 
 	g_print("new CustomData start");
 	CustomData *data = g_new0(CustomData, 1);
@@ -477,37 +620,8 @@ static void gst_native_init(JNIEnv* env, jobject thiz) {
 	data->app = (*env)->NewGlobalRef(env, thiz);
 	g_print("Created GlobalRef for app object at %p", data->app);
 
-	pthread_create(&gst_app_thread, NULL, &app_function, data);
+	//pthread_create(&gst_app_thread, NULL, &app_function, data);
 
-	//here
-	//because
-	/**
-	 * If some process has the pipe open for writing and O_NONBLOCK is set,
-	 * read() shall return -1 and set errno to [EAGAIN].
-	 *
-	 If some process has the pipe open for writing and O_NONBLOCK is clear,
-	 read() shall block the calling thread until some data is written
-	 or the pipe is closed by all processes that had the pipe open for writing.
-	 *
-	 *
-	 *open function also have the above feature, i.e open for reading and open
-	 *for writing on pipe must both called,  at least one called in another thread
-	 *, if not, open would be blocked!
-	 *
-	 *
-	 *so here, we need pthread_create... called first!
-	 */
-	g_print("in_fd : %d", in_fd);
-	if (-1 == in_fd) {
-		/*打开FIFO*/
-		in_fd = open(PIPE_PATH, O_WRONLY);
-		if (-1 == in_fd) {
-			g_print("open %s error, errno:%d", PIPE_PATH, errno);
-			return;
-		} else {
-			g_print("in_fd : %d", in_fd);
-		}
-	}
 }
 
 /* Quit the main loop, remove the native thread and free resources */
@@ -527,14 +641,7 @@ static void gst_native_finalize(JNIEnv* env, jobject thiz) {
 	}
 
 	//anothread may use fd, so join it first
-	closefd(&in_fd, "in_fd");
-	closefd(&out_fd, "out_fd");
-
-	int ret = remove(PIPE_PATH);
-	if (0 != ret) {
-		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
-				"remove %s fail, errno:%d", PIPE_PATH, errno);
-	}
+	fin_shmfile();
 
 	GST_DEBUG("Deleting GlobalRef for app object at %p", data->app);
 	(*env)->DeleteGlobalRef(env, data->app);
@@ -563,47 +670,30 @@ static void gst_native_play(JNIEnv* env, jobject thiz) {
 
 		//processing unexception
 		{
-			closefd(&in_fd, "in_fd");
-			closefd(&out_fd, "out_fd");
-			int ret = remove(PIPE_PATH);
-			if (0 != ret) {
-				__android_log_print(ANDROID_LOG_ERROR, TAGSTR, "remove %s fail",
-						PIPE_PATH);
+			fin_shmfile();
+			gboolean ans = init_shmfile(env);
+			if (FALSE == ans) {
+				iEnd = 1;
+				return;
 			}
-
-			init_pipeline(env, thiz);
 		}
 
 		pthread_create(&gst_app_thread, NULL, &app_function, data);
 
-		g_print("in_fd : %d", in_fd);
-		if (-1 == in_fd) {
-			/*打开FIFO*/
-			in_fd = open(PIPE_PATH, O_WRONLY);
-			if (-1 == in_fd) {
-				g_print("open %s error, errno:%d", PIPE_PATH, errno);
-				return;
-			} else {
-				g_print("in_fd : %d", in_fd);
-			}
-		}
 	}
 
 	//check pipeline is ok(it generated in another thread)
 	// then go on
 	int nLoop = 20;
-	while(FALSE == data->initialized)
-	{
+	while (FALSE == data->initialized) {
 		usleep(200000);
 		nLoop--;
-		if (nLoop <= 0)
-		{
+		if (nLoop <= 0) {
 			__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
 					"inital gstreamer data timeout!");
 			break;
 		}
 	}
-
 
 	GstStateChangeReturn ret;
 
@@ -633,9 +723,9 @@ static void gst_native_pause(JNIEnv* env, jobject thiz) {
 
 static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) {
 
-	if (-1 == in_fd) {
+	if (NULL == head_maped) {
 		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
-				"could not inputdata, in_fd -1");
+				"could not inputdata, head_maped null");
 		return;
 	}
 
@@ -643,57 +733,69 @@ static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) 
 	unsigned char *chArr = (unsigned char *) ((*env)->GetByteArrayElements(env,
 			jbarray, 0));
 
-	int nWrite = 0;
-
 	time_t begin = time(NULL);
-	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
-			"begin time is  %ld", begin);
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "begin time is  %ld", begin);
 
-	while (nWrite < nArrLen) {
-		int n_once = write(in_fd, chArr + nWrite, nArrLen - nWrite);
+	//care number overflow!
+	if (in_index + nArrLen <= recv_len)
+		memcpy(head_maped + in_index, chArr, nArrLen);
+	else {
+		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+				"in_index+nArrLen %ld > recv_len %ld", in_index + nArrLen,
+				recv_len);
 
-		if (0 == n_once) {
-			__android_log_print(ANDROID_LOG_INFO, TAGSTR, "write return zero?");
-			continue;
+		return;
+	}
+
+	if (NULL != pmutex) {
+		if (0 != pthread_mutex_lock(pmutex)) {
+			g_print("uupthread_mutex_lock fail!");
+		} else {
+			g_print("uupthread_mutex_lock succ!");
 		}
-		if (n_once > 0)
-			nWrite += n_once;
-		else {
-			__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
-					"Could not write, errno:%d", errno);
-			break;
+	} else {
+		g_print("pmutex is null!");
+	}
+
+	in_index += nArrLen;
+
+	if (NULL != pmutex) {
+		if (0 != pthread_mutex_unlock(pmutex)) {
+			g_print("uupthread_mutex_UNlock fail!");
+		} else {
+			g_print("uupthread_mutex_UNlock succ!");
 		}
+	} else {
+		g_print("pmutex is null!");
 	}
 
 	time_t end = time(NULL);
-	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
-			"end time is  %ld", end);
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "end time is  %ld", end);
 
-	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
-			"end-begin is  %ld", (long)end-(long)begin);
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "end-begin is  %ld",
+			(long) end - (long) begin);
 
 	//
-	read_len += nWrite;
 
-	if (read_len == recv_len) {
-		closefd(&in_fd, "in_fd");
-	}
-
-	if (read_len > recv_len) {
-		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
-				"happen unexpection error, readlen %d > recvlen %d", read_len,
-				recv_len);
-
-		closefd(&in_fd, "in_fd");
+	if (in_index == recv_len) {
+		__android_log_print(ANDROID_LOG_INFO, TAGSTR,
+				"finish gst_native_inputdata!!");
 	}
 
 	(*env)->ReleaseByteArrayElements(env, jbarray, chArr, 0);
 }
 
-static void gst_native_setrecvlen(JNIEnv* env, jobject thiz, jint jlen) {
+static jboolean gst_native_setrecvlen(JNIEnv* env, jobject thiz, jlong jlen) {
+
+	//java just support long, use BigInteger future
 	recv_len = jlen;
-	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "play byteslen :%d",
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "play byteslen :%ld",
 			recv_len);
+
+	//gboolean ans = init_shmfile(env);
+
+	return TRUE;
+
 }
 
 /* Static class initializer: retrieve method and field IDs */
@@ -723,7 +825,7 @@ static JNINativeMethod native_methods[] = { { "nativeInit", "()V",
 		(void *) gst_native_finalize }, { "nativePlay", "()V",
 		(void *) gst_native_play }, { "nativePause", "()V",
 		(void *) gst_native_pause }, { "nativeInputData", "([B)V",
-		(void *) gst_native_inputdata }, { "nativeSetRecvLen", "(I)V",
+		(void *) gst_native_inputdata }, { "nativeSetRecvLen", "(J)Z",
 		(void *) gst_native_setrecvlen }, { "nativeClassInit", "()Z",
 		(void *) gst_native_class_init } };
 

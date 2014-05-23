@@ -20,7 +20,7 @@ public class GstUtilNative
 
 	private native void nativeInputData(byte [] data);
 	
-	private native void nativeSetRecvLen(int len);
+	private native boolean nativeSetRecvLen(long len);
 	
 	private static native boolean nativeClassInit(); // Initialize native class:
 														// cache Method IDs for
@@ -37,9 +37,9 @@ public class GstUtilNative
 	* @return void
 	* @throws
 	 */
-	public void setRecvLen(int len)
+	public boolean setRecvLen(long len)
 	{
-		nativeSetRecvLen(len);
+		return nativeSetRecvLen(len);
 	}
 	
 	/**

@@ -292,8 +292,12 @@ public class MainActivity extends Activity implements GstMsgListener
 					
 					int fLen = (int) Long.parseLong(info);
 					
-					mGstNative.setRecvLen(fLen);
-					
+					boolean ans = mGstNative.setRecvLen(fLen);
+					if (false == ans)
+					{
+						Toast.makeText(getApplicationContext(), "init shm file fail!",
+								Toast.LENGTH_LONG).show();
+					}
 					return;
 				}		
 				
