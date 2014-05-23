@@ -225,7 +225,7 @@ static gboolean push_data(CustomData *data) {
 				__android_log_print(ANDROID_LOG_INFO, TAGSTR,
 						"buff readable is empty!");
 
-				usleep(100000);
+				sleep(1);
 				nLoop--;
 				if (nLoop <= 0) {
 					__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
