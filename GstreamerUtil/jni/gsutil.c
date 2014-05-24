@@ -169,34 +169,43 @@ static gboolean push_data(CustomData *data) {
 	g_print("gsutil:push_data enter");
 
 	//avoiding pushing data again when finish but enter eos_cb not yet
-	if (out_index >= recv_len)
-	{
-		__android_log_print(ANDROID_LOG_INFO, TAGSTR,
-				"already finish playing");
+	if (out_index >= recv_len) {
+		__android_log_print(ANDROID_LOG_INFO, TAGSTR, "already finish playing");
 		return FALSE;
 	}
 
-	GstBuffer *buffer;
+	GstBuffer *buffer = NULL;
 	GstFlowReturn ret;
 
-	guint8 *raw;
+	guint8 *raw = NULL;
 
-	/* Create a new empty buffer */
-	buffer = gst_buffer_new_and_alloc(CHUNK_SIZE);
-
-	raw = (guint8 *) GST_BUFFER_DATA(buffer);
-
-	int nRead = 0;
 #if 0
 	time_t begin = time(NULL);
 	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
 			"begin time is  %ld", begin);
 #endif
 
-
+	int nRead = 0;
 	if (out_index + CHUNK_SIZE > recv_len) {
-		memcpy(raw, head_maped + out_index, recv_len - out_index);
-		out_index = recv_len;
+		//memcpy(raw, head_maped + out_index, recv_len - out_index);
+		//out_index = recv_len;
+		int nLoop = 60;
+		while (1) {
+			if (in_index == recv_len) {
+				g_print("only small chunk now!");
+				nRead = recv_len - out_index;
+				break;
+			}
+			sleep(1);
+			nLoop--;
+			if (nLoop <= 0) {
+				__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+						"get small chunk  data  timeout after 6s!");
+				return FALSE;
+			} else {
+				continue;
+			}
+		}//WHILE
 	} else {
 		int nLoop = 60;
 		while (1) {
@@ -231,38 +240,41 @@ static gboolean push_data(CustomData *data) {
 					__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
 							"get CHUNK_SIZE data  timeout after 6s!");
 
-					gst_buffer_unref(buffer);
+					//gst_buffer_unref(buffer);
 
 					return FALSE;
-				}
-				else
-				{
+				} else {
 					continue;
 				}
 				//return FALSE;
-			}
-			else
-			{
+			} else {
+				if (NULL != pmutex) {
+					if (0 != pthread_mutex_unlock(pmutex)) {
+						g_print("uupthread_mutex_UNlock fail!");
+					} else {
+						g_print("uupthread_mutex_UNlock succ!");
+					}
+				} else {
+					g_print("pmutex is null!");
+				}
+
 				break;
 			}
 
-		}//while
+		} //while
 
-		if (NULL != pmutex) {
-			if (0 != pthread_mutex_unlock(pmutex)) {
-				g_print("uupthread_mutex_UNlock fail!");
-			} else {
-				g_print("uupthread_mutex_UNlock succ!");
-			}
-		} else {
-			g_print("pmutex is null!");
-		}
+		nRead = CHUNK_SIZE;
 
-
-		memcpy(raw, head_maped + out_index, CHUNK_SIZE);
-
-		out_index += CHUNK_SIZE;
 	}
+
+	/* Create a new empty buffer */
+	buffer = gst_buffer_new_and_alloc(nRead);//CHUNK_SIZE
+
+	raw = (guint8 *) GST_BUFFER_DATA(buffer);
+
+	memcpy(raw, head_maped + out_index, nRead);//CHUNK_SIZE
+
+	out_index += nRead;//CHUNK_SIZE
 
 	if (out_index == recv_len) {
 		__android_log_print(ANDROID_LOG_INFO, TAGSTR, "finish reading");

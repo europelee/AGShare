@@ -141,6 +141,11 @@ public class MainActivity extends Activity implements GstMsgListener
 				Toast.makeText(MainActivity.this, "service not active!",
 						Toast.LENGTH_LONG).show();
 				break;
+			case 4:
+				
+				Toast.makeText(MainActivity.this, (String)msg.obj,
+						Toast.LENGTH_LONG).show();				
+				break;
 			default:
 				Toast.makeText(MainActivity.this, "unkown message!",
 						Toast.LENGTH_LONG).show();
@@ -411,6 +416,7 @@ public class MainActivity extends Activity implements GstMsgListener
 						{
 							Log.e(TAG, "doSendRaw fail!");
 						}
+						Looper.myLooper().loop();
 					}
 				}, "sender");
 
@@ -455,6 +461,7 @@ public class MainActivity extends Activity implements GstMsgListener
 			int len = 0;
 
 			int nChunk = 102400;
+			long begin =  System.currentTimeMillis();
 			while (true)
 			{
 				try
@@ -515,6 +522,13 @@ public class MainActivity extends Activity implements GstMsgListener
 				}
 
 			}
+			
+			long end = System.currentTimeMillis();
+			long timecount = end - begin;
+			Message msg1 = new Message();
+			msg1.what = 4;
+			msg1.obj = "time count is "+timecount/1000;
+			handler.sendMessage(msg1);
 
 			try
 			{
