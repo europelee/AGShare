@@ -1,6 +1,10 @@
 AjUtil
 ======
 
+alljoyn_gstreamer library:everything connected and communicating,   
+and support audio/video streaming.  
+
+
 alljoyn wrapper(just support android now), and some demo.
 the wrapper provides a android service named EndPtService,
 and DeviceInterace/DeviceService used to send/recv data,
