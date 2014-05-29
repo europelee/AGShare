@@ -22,6 +22,12 @@ public class GstUtilNative
 	
 	private native boolean nativeSetRecvLen(long len);
 	
+	private native void		nativeSetChunkSize(int csize);
+	private native void 	nativeSetBuffScale(int scale);
+	private native void 	nativeSetMediaType(int mediatype);
+    private native void nativeSurfaceInit(Object surface); // A new surface is available
+    private native void nativeSurfaceFinalize(); // Surface about to be destroyed
+    
 	private static native boolean nativeClassInit(); // Initialize native class:
 														// cache Method IDs for
 														// callbacks
@@ -29,6 +35,63 @@ public class GstUtilNative
 	private long native_custom_data; // Native code will use this to keep
 										// private data
 
+	
+	public void setChunkSize(int csize)
+	{
+		nativeSetChunkSize(csize);
+	}
+	/**
+	 * 
+	* @Title: setBuffScale 
+	* @Description: buffing before building pipeline, scale [0,100]
+	* @param @param scale
+	* @return void
+	* @throws
+	 */
+	public void setBuffScale(int scale)
+	{
+		nativeSetBuffScale(scale);
+	}
+	
+	/**
+	 * 
+	* @Title: surfaceInit 
+	* @Description: set surfaceview for gstreamer pipeline sink
+	* @param @param surface
+	* @return void
+	* @throws
+	 */
+	public void surfaceInit(Object surface)
+	{
+		nativeSurfaceInit(surface);
+	}
+	
+	/**
+	 * 
+	* @Title: surfaceFinalize 
+	* @Description: clear surfaceview for gstreamer pipeline sink
+	* @param 
+	* @return void
+	* @throws
+	 */
+	public void surfaceFinalize()
+	{
+		nativeSurfaceFinalize();
+	}
+	
+	/**
+	 * 
+	* @Title: setMediaType 
+	* @Description: 0: audio default, 1: video 
+	* @param @param mediatype
+	* @return void
+	* @throws
+	 */
+	public void  setMediaType(int mediatype)
+	{
+		nativeSetMediaType(mediatype);
+	}
+	
 	/**
 	 * 
 	* @Title: setRecvLen 

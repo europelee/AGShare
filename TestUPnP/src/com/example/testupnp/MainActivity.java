@@ -18,6 +18,7 @@ import org.upnp.alljoynservice.end.*;
 import org.upnp.gstreamerutil.GstMsgListener;
 import org.upnp.gstreamerutil.GstUtilNative;
 
+
 import com.gstreamer.GStreamer;
 
 import android.os.Bundle;
@@ -37,13 +38,15 @@ import android.content.SharedPreferences;
 import android.content.SharedPreferences.Editor;
 import android.util.Log;
 import android.view.Menu;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
-public class MainActivity extends Activity implements GstMsgListener
+public class MainActivity extends Activity implements GstMsgListener, SurfaceHolder.Callback
 {
 
 	private static final String TAG = "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%";
@@ -56,6 +59,9 @@ public class MainActivity extends Activity implements GstMsgListener
 	private Button btnTest11 = null;
 	private Button btnTest12 = null;
 	private Button btnTest13 = null;
+	private Button btnTest14 = null;
+	SurfaceHolder sh		 = null;
+	TextView tv0 			 = null;
 	private String sBClient = "client";
 	private Thread mServiceThread = null;
 	private EndPtService localService = null;
@@ -142,9 +148,10 @@ public class MainActivity extends Activity implements GstMsgListener
 						Toast.LENGTH_LONG).show();
 				break;
 			case 4:
+				tv0.setText((String)msg.obj);
+				//Toast.makeText(MainActivity.this, (String)msg.obj,
+				//		Toast.LENGTH_LONG).show();		
 				
-				Toast.makeText(MainActivity.this, (String)msg.obj,
-						Toast.LENGTH_LONG).show();				
 				break;
 			default:
 				Toast.makeText(MainActivity.this, "unkown message!",
@@ -183,6 +190,7 @@ public class MainActivity extends Activity implements GstMsgListener
 
 		editor.commit();
 
+		tv0 = (TextView) this.findViewById(R.id.text0);
 		btnTest3 = (Button) findViewById(R.id.button7);
 		btnTest3.setOnClickListener(new View.OnClickListener()
 		{
@@ -205,7 +213,10 @@ public class MainActivity extends Activity implements GstMsgListener
 				Log.i(TAG, "after:  client:" + sp.getBoolean(sBClient, true));
 
 				if (sp.getBoolean(sBClient, true))
+				{
 					btnTest3.setText("client");
+					
+				}
 				else
 					btnTest3.setText("server");
 
@@ -220,6 +231,38 @@ public class MainActivity extends Activity implements GstMsgListener
 			public void onClick(View v)
 			{
 				// TODO Auto-generated method stub
+				if (sp.getBoolean(sBClient, true))
+				{
+					startService();
+					try
+					{
+						Thread.sleep(1000);
+					}
+					catch (Exception ee)
+					{
+					}					
+					if (null == localService)
+					{
+						return;
+					}
+					boolean ans = localService.getSessionStatus();
+					if ( ans)
+					{
+						if (!bSetupSession)
+						{
+							bSetupSession = true;
+							Log.i(TAG, "activity get succ session");
+							localService.setBusDataListener(mTestListener);
+							handler.sendEmptyMessage(1);
+						}
+					}
+					else
+					{
+						Toast.makeText(MainActivity.this, "activity  session connecting!",
+								Toast.LENGTH_LONG).show(); 
+					}
+					return;
+				}
 				mServiceThread = new Thread(new ServiceRunnable(),
 						"mServiceThread");
 				mServiceThread.start();
@@ -228,7 +271,7 @@ public class MainActivity extends Activity implements GstMsgListener
 		});
 
 		mLoopNumEdit = (EditText) findViewById(R.id.editLoopNum);
-		mLoopNumEdit.setText("hello alljoyn!");
+		mLoopNumEdit.setText("0");
 
 		btnTest9 = (Button) findViewById(R.id.button9);
 		btnTest9.setOnClickListener(new View.OnClickListener()
@@ -351,7 +394,10 @@ public class MainActivity extends Activity implements GstMsgListener
 				{
 					// gst
 					mGstNative.setGstMsgListener(MainActivity.this);
+
 					mGstNative.InitGstreamer();
+					//if (true == btnTest14.getText().equals("audio"))//now video
+					mGstNative.surfaceInit(sh.getSurface());
 					return;
 				}
 			}
@@ -369,6 +415,30 @@ public class MainActivity extends Activity implements GstMsgListener
 					mGstNative.FinGstreamer();
 			}
 		});
+		btnTest14 = (Button) findViewById(R.id.button14);
+		btnTest14.setOnClickListener(new View.OnClickListener()
+		{
+
+			@Override
+			public void onClick(View v)
+			{
+				// TODO Auto-generated method stub
+				if(true == btnTest14.getText().equals("video"))
+				{
+					Log.d(TAG, "video");
+					btnTest14.setText("audio");
+					//mGstNative.setMediaType(1);
+					mGstNative.setChunkSize(1024*256);
+				}
+				else
+				{
+					Log.d(TAG, "audio");
+					btnTest14.setText("video");
+					//mGstNative.setMediaType(0);
+					mGstNative.setChunkSize(1024*1024*1);
+				}
+			}
+		});		
 		
 		btnTest11 = (Button) findViewById(R.id.button11);
 		btnTest11.setOnClickListener(new View.OnClickListener()
@@ -384,6 +454,9 @@ public class MainActivity extends Activity implements GstMsgListener
 					 * Toast.makeText(getApplicationContext(), testBytes,
 					 * Toast.LENGTH_LONG).show(); testBytes = "";
 					 */
+					
+					int fLen = (int) Long.parseLong( mLoopNumEdit.getText().toString());
+					mGstNative.setBuffScale(fLen);
 					mGstNative.play();
 					return;
 				}
@@ -424,6 +497,9 @@ public class MainActivity extends Activity implements GstMsgListener
 			}
 		});
 
+        SurfaceView sv = (SurfaceView) this.findViewById(R.id.surface_video);
+        sh = sv.getHolder();
+        sh.addCallback(this);
 
 	}
 
@@ -457,10 +533,10 @@ public class MainActivity extends Activity implements GstMsgListener
 				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
-			byte[] refMsg = new byte[204800];// 魔术数
+			byte[] refMsg = new byte[1024*1024];// 魔术数
 			int len = 0;
 
-			int nChunk = 102400;
+			int nChunk = 1024*128;
 			long begin =  System.currentTimeMillis();
 			while (true)
 			{
@@ -527,7 +603,7 @@ public class MainActivity extends Activity implements GstMsgListener
 			long timecount = end - begin;
 			Message msg1 = new Message();
 			msg1.what = 4;
-			msg1.obj = "time count is "+timecount/1000;
+			msg1.obj = "time count is "+timecount/1000+"."+timecount%1000;
 			handler.sendMessage(msg1);
 
 			try
@@ -794,5 +870,35 @@ public class MainActivity extends Activity implements GstMsgListener
 				tv.setText(tmp);
 			}
 		});
+	}
+
+	@Override
+	public void surfaceChanged(SurfaceHolder holder, int format, int width,
+			int height)
+	{
+		// TODO Auto-generated method stub
+        Log.d("GStreamer", "Surface changed to format " + format + " width "
+                + width + " height " + height);
+    
+        Log.d(TAG, ""+sh+"vs"+holder);
+        mGstNative.surfaceInit( holder.getSurface());
+	}
+
+	@Override
+	public void surfaceCreated(SurfaceHolder holder)
+	{
+		// TODO Auto-generated method stub
+		mGstNative.setMediaType(1);
+		Log.d(TAG, ""+sh+"vs"+holder);
+		 Log.d("GStreamer", "Surface created: " + holder.getSurface());
+	}
+
+	@Override
+	public void surfaceDestroyed(SurfaceHolder holder)
+	{
+		// TODO Auto-generated method stub
+        Log.d("GStreamer", "Surface destroyed");
+        Log.d(TAG, ""+sh+"vs"+holder);
+        mGstNative.surfaceFinalize();
 	}
 }

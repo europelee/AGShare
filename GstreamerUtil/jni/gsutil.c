@@ -1,6 +1,8 @@
 #include <string.h>
 #include <jni.h>
 #include <android/log.h>
+#include <android/native_window.h>
+#include <android/native_window_jni.h>
 #include <gst/gst.h>
 #include <pthread.h>
 #include <sys/stat.h>
@@ -8,6 +10,10 @@
 #include <unistd.h>
 #include<sys/types.h>
 #include <sys/mman.h>
+#include <gst/interfaces/xoverlay.h>
+#include <gst/video/video.h>
+#include <sys/time.h>
+#include <time.h>
 
 GST_DEBUG_CATEGORY_STATIC( debug_category);
 #define GST_CAT_DEFAULT debug_category
@@ -24,7 +30,7 @@ GST_DEBUG_CATEGORY_STATIC( debug_category);
 # define SET_CUSTOM_DATA(env, thiz, fieldID, data) (*env)->SetLongField (env, thiz, fieldID, (jlong)(jint)data)
 #endif
 
-#define CHUNK_SIZE  102400   /* Amount of bytes we are sending in each buffer */
+static unsigned long CHUNK_SIZE=1024*256;    /* Amount of bytes we are sending in each buffer */
 
 /* Structure to contain all our information, so we can pass it to callbacks */
 typedef struct _CustomData {
@@ -34,8 +40,16 @@ typedef struct _CustomData {
 	GMainLoop *main_loop; /* GLib main loop */
 	gboolean initialized; /* To avoid informing the UI multiple times about the initialization */
 	GstElement *app_source;
-
+	ANativeWindow *native_window; /* The Android native window where video will be rendered */
+	GstState target_state;
 } CustomData;
+
+/* playbin2 flags */
+typedef enum {
+	GST_PLAY_FLAG_VIDEO = (1 << 0), /* We want video output */
+	GST_PLAY_FLAG_AUDIO = (1 << 1), /* We want audio output */
+	GST_PLAY_FLAG_TEXT = (1 << 2) /* We want subtitle output */
+} GstPlayFlags;
 
 /* These global variables cache values which are not changing during execution */
 static pthread_t gst_app_thread;
@@ -45,6 +59,7 @@ static jfieldID custom_data_field_id;
 static jmethodID set_message_method_id;
 static jmethodID on_gstreamer_initialized_method_id;
 
+/*below*/
 static int iEnd = 1;
 static const char * TAGSTR = "gsutil";
 
@@ -61,6 +76,8 @@ static unsigned long out_index = 0;
 // Mutex instance
 static pthread_mutex_t * pmutex = NULL;
 
+static int iMediaType = 0; //0: audio, 1: video
+static int iPreBuff = 0; // 0-100
 /*
  * Private methods
  */
@@ -179,12 +196,6 @@ static gboolean push_data(CustomData *data) {
 
 	guint8 *raw = NULL;
 
-#if 0
-	time_t begin = time(NULL);
-	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
-			"begin time is  %ld", begin);
-#endif
-
 	int nRead = 0;
 	if (out_index + CHUNK_SIZE > recv_len) {
 		//memcpy(raw, head_maped + out_index, recv_len - out_index);
@@ -200,15 +211,17 @@ static gboolean push_data(CustomData *data) {
 			nLoop--;
 			if (nLoop <= 0) {
 				__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
-						"get small chunk  data  timeout after 6s!");
+						"get small chunk  data  timeout!");
+				set_ui_message("get small chunk  data  timeout", data);
 				return FALSE;
 			} else {
 				continue;
 			}
-		}//WHILE
+		} //WHILE
 	} else {
 		int nLoop = 60;
 		while (1) {
+#if 0
 			if (NULL != pmutex) {
 				if (0 != pthread_mutex_lock(pmutex)) {
 					g_print("uupthread_mutex_lock fail!");
@@ -218,28 +231,31 @@ static gboolean push_data(CustomData *data) {
 			} else {
 				g_print("pmutex is null!");
 			}
-
-			if (out_index + CHUNK_SIZE > in_index) {
-
-				if (NULL != pmutex) {
-					if (0 != pthread_mutex_unlock(pmutex)) {
-						g_print("uupthread_mutex_UNlock fail!");
-					} else {
-						g_print("uupthread_mutex_UNlock succ!");
-					}
+#endif
+			unsigned long in_indexcp = in_index;
+#if 0
+			if (NULL != pmutex) {
+				if (0 != pthread_mutex_unlock(pmutex)) {
+					g_print("uupthread_mutex_UNlock fail!");
 				} else {
-					g_print("pmutex is null!");
+					g_print("uupthread_mutex_UNlock succ!");
 				}
+			} else {
+				g_print("pmutex is null!");
+			}
+#endif
+			if (out_index + CHUNK_SIZE > in_indexcp) {
 
 				__android_log_print(ANDROID_LOG_INFO, TAGSTR,
 						"buff readable is empty!");
 
+				//int delta = 6 - 6 * (in_indexcp - out_index + 1) / CHUNK_SIZE;
 				sleep(1);
 				nLoop--;
 				if (nLoop <= 0) {
 					__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
-							"get CHUNK_SIZE data  timeout after 6s!");
-
+							"get CHUNK_SIZE data  timeout!");
+					set_ui_message("get CHUNK_SIZE data  timeout", data);
 					//gst_buffer_unref(buffer);
 
 					return FALSE;
@@ -248,16 +264,9 @@ static gboolean push_data(CustomData *data) {
 				}
 				//return FALSE;
 			} else {
-				if (NULL != pmutex) {
-					if (0 != pthread_mutex_unlock(pmutex)) {
-						g_print("uupthread_mutex_UNlock fail!");
-					} else {
-						g_print("uupthread_mutex_UNlock succ!");
-					}
-				} else {
-					g_print("pmutex is null!");
-				}
 
+				__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+						"spend %d s for getting CHUNK_SIZE data", (60 - nLoop));
 				break;
 			}
 
@@ -267,14 +276,22 @@ static gboolean push_data(CustomData *data) {
 
 	}
 
-	/* Create a new empty buffer */
-	buffer = gst_buffer_new_and_alloc(nRead);//CHUNK_SIZE
+	if (100 == iPreBuff)
+	{
+		nRead = recv_len;
+		 if (madvise (head_maped + out_index, nRead, MADV_SEQUENTIAL) < 0) {
+			 g_print( "warning: madvise failed: %s",
+					 g_strerror (errno));
 
-	raw = (guint8 *) GST_BUFFER_DATA(buffer);
+		 }
+		 sleep(5);
+	}
 
-	memcpy(raw, head_maped + out_index, nRead);//CHUNK_SIZE
+	buffer = gst_buffer_new();
+	GST_BUFFER_DATA (buffer) = head_maped + out_index;
+	GST_BUFFER_SIZE (buffer) = nRead;
 
-	out_index += nRead;//CHUNK_SIZE
+	out_index += nRead; //CHUNK_SIZE
 
 	if (out_index == recv_len) {
 		__android_log_print(ANDROID_LOG_INFO, TAGSTR, "finish reading");
@@ -282,19 +299,11 @@ static gboolean push_data(CustomData *data) {
 		iEnd = 1;
 	}
 
-#if 0
-	time_t end = time(NULL);
-	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
-			"end time is  %ld", end);
-
-	__android_log_print(ANDROID_LOG_INFO, TAGSTR,
-			"end-begin is  %ld", (long)end-(long)begin);
-#endif
 	/* Push the buffer into the appsrc */
-	g_signal_emit_by_name(data->app_source, "push-buffer", buffer, &ret);
-
+	//g_signal_emit_by_name(data->app_source, "push-buffer", buffer, &ret);
+	ret = gst_app_src_push_buffer(data->app_source, buffer);
 	/* Free the buffer now that we are done with it */
-	gst_buffer_unref(buffer);
+	//gst_buffer_unref(buffer);
 
 	if (ret != GST_FLOW_OK) {
 		/* We got some error, stop sending data */
@@ -340,9 +349,46 @@ static void source_setup(GstElement *pipeline, GstElement *source,
 	g_object_set(source, "caps", gany, NULL);
 	gst_caps_unref(gany);
 
+	/* we can set the length in appsrc. This allows some elements to estimate the
+	 * total duration of the stream. It's a good idea to set the property when you
+	 * can but it's not required.
+	 */
+	g_object_set(source, "size", (gint64) recv_len, NULL);
+	g_print("source size is %lld", gst_app_src_get_size () );
+
+	if (100 != iPreBuff)
+	{
+	g_object_set(source, "max-bytes", (gint64)(2*CHUNK_SIZE), NULL);
+	g_print("max-bytes: %d", gst_app_src_get_max_bytes(source));
+
+	g_object_set(source, "min-percent", 60, NULL);
+	}
+	else
+	{
+		g_object_set(source, "max-bytes", (gint64)0, NULL);
+		g_print("max-bytes: %d", gst_app_src_get_max_bytes(source));
+	}
+
 	g_signal_connect(source, "need-data", G_CALLBACK(start_feed), data);
 	g_signal_connect(source, "enough-data", G_CALLBACK(stop_feed), data);
 
+}
+
+static void buffering_cb(GstBus *bus, GstMessage *msg, CustomData *data) {
+	gint percent;
+
+	gst_message_parse_buffering(msg, &percent);
+
+	if (percent < 100 && data->target_state >= GST_STATE_PAUSED) {
+		gchar * message_string = g_strdup_printf("Buffering %d%%", percent);
+		gst_element_set_state(data->pipeline, GST_STATE_PAUSED);
+		set_ui_message(message_string, data);
+		g_free(message_string);
+	} else if (data->target_state >= GST_STATE_PLAYING) {
+		gst_element_set_state(data->pipeline, GST_STATE_PLAYING);
+	} else if (data->target_state >= GST_STATE_PAUSED) {
+		set_ui_message("Buffering complete", data);
+	}
 }
 
 /* Retrieve errors from the bus and show them on the UI */
@@ -358,8 +404,11 @@ static void error_cb(GstBus *bus, GstMessage *msg, CustomData *data) {
 	g_free(debug_info);
 	set_ui_message(message_string, data);
 	g_free(message_string);
+	data->target_state = GST_STATE_NULL;
 	gst_element_set_state(data->pipeline, GST_STATE_NULL);
 }
+
+
 
 /* Notify UI about pipeline state changes */
 static void state_changed_cb(GstBus *bus, GstMessage *msg, CustomData *data) {
@@ -393,6 +442,14 @@ static void check_initialization_complete(CustomData *data) {
 		GST_DEBUG(
 				"Initialization complete, notifying application. main_loop:%p",
 				data->main_loop);
+
+		if (1 == iMediaType && data->native_window) {
+			g_print("set draw window for pipeline");
+			/* The main loop is running and we received a native window, inform the sink about it */
+			gst_x_overlay_set_window_handle(GST_X_OVERLAY(data->pipeline),
+					(guintptr) data->native_window);
+
+		}
 		(*env)->CallVoidMethod(env, data->app,
 				on_gstreamer_initialized_method_id);
 		if ((*env)->ExceptionCheck(env)) {
@@ -421,6 +478,7 @@ static void *app_function(void *userdata) {
 	in_index = 0;
 	out_index = 0;
 
+	guint flags;
 	// Initialize mutex
 	//it need this thread start first before alljoyn calling input data
 	if (NULL != pmutex) {
@@ -438,6 +496,47 @@ static void *app_function(void *userdata) {
 		g_print("pthread_mutex_init succ!");
 	}
 
+	unsigned long nBuff = recv_len * ((float) iPreBuff / 100);
+	g_print("nBuff is %lu", nBuff);
+
+	while (1) {
+		g_print("buff some content before play!");
+#if 0
+		if (NULL != pmutex) {
+			if (0 != pthread_mutex_lock(pmutex)) {
+				g_print("uupthread_mutex_lock fail!");
+			} else {
+				g_print("uupthread_mutex_lock succ!");
+			}
+		} else {
+			g_print("pmutex is null!");
+		}
+#endif
+		unsigned long in_indexcp = in_index;
+
+#if 0
+		if (NULL != pmutex) {
+			if (0 != pthread_mutex_unlock(pmutex)) {
+				g_print("uupthread_mutex_UNlock fail!");
+			} else {
+				g_print("uupthread_mutex_UNlock succ!");
+			}
+		} else {
+			g_print("pmutex is null!");
+		}
+#endif
+		if (1 == iEnd)
+		{
+			g_print("unexception error!");
+
+			break;
+		}
+		if (in_indexcp >= nBuff) {
+			break;
+		} else {
+			sleep(1);
+		}
+	}
 	//
 	JavaVMAttachArgs args;
 	GstBus *bus;
@@ -477,6 +576,15 @@ static void *app_function(void *userdata) {
 		return NULL;
 	}
 
+	/* Disable subtitles */
+	g_object_get(data->pipeline, "flags", &flags, NULL);
+	flags |= GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_AUDIO;
+	flags &= ~GST_PLAY_FLAG_TEXT;
+	g_object_set(data->pipeline, "flags", flags, NULL);
+
+	data->target_state = GST_STATE_READY;
+	gst_element_set_state(data->pipeline, GST_STATE_READY);
+
 	g_signal_connect(data->pipeline, "source-setup", G_CALLBACK(source_setup),
 			data);
 
@@ -494,6 +602,9 @@ static void *app_function(void *userdata) {
 			data);
 	g_signal_connect(G_OBJECT(bus), "message::state-changed",
 			(GCallback) state_changed_cb, data);
+
+	g_signal_connect(G_OBJECT(bus), "message::buffering",
+			(GCallback) buffering_cb, data);
 	gst_object_unref(bus);
 
 	/* Create a GLib Main Loop and set it to run */
@@ -503,6 +614,22 @@ static void *app_function(void *userdata) {
 
 	/* Start playing the pipeline */
 	//gst_element_set_state(data->pipeline, GST_STATE_PLAYING);
+	GstStateChangeReturn ret;
+
+	data->target_state = GST_STATE_PLAYING;
+	ret = gst_element_set_state(data->pipeline, GST_STATE_PLAYING);
+	if (ret == GST_STATE_CHANGE_FAILURE) {
+		g_print("Unable to set the pipeline to the playing state.\n");
+		return;
+	} else if (ret == GST_STATE_CHANGE_NO_PREROLL) {
+		g_print(" data.is_live = TRUE.\n");
+
+	} else if (ret == GST_STATE_CHANGE_SUCCESS) {
+		g_print(" GST_STATE_CHANGE_SUCCESS.\n");
+	}
+
+	g_print("rest is %d", ret);
+
 	g_main_loop_run(data->main_loop);
 
 	GST_DEBUG("Exited main loop");
@@ -512,6 +639,7 @@ static void *app_function(void *userdata) {
 	/* Free resources */
 	g_main_context_pop_thread_default(data->context);
 	g_main_context_unref(data->context);
+	data->target_state = GST_STATE_NULL;
 	gst_element_set_state(data->pipeline, GST_STATE_NULL);
 	gst_object_unref(data->pipeline);
 
@@ -617,6 +745,23 @@ static gboolean init_shmfile(JNIEnv* env) {
 /*
  * Java Bindings
  */
+static void gst_native_set_chunksize(JNIEnv* env, jobject thiz, jint csize)
+{
+	CHUNK_SIZE = csize;
+}
+
+static void gst_native_set_prebuff_scale(JNIEnv* env, jobject thiz, jint scale) {
+	if (scale < 0)
+		scale = 0;
+	if (scale > 100)
+		scale = 100;
+
+	iPreBuff = scale;
+}
+
+static void gst_native_set_mediatype(JNIEnv* env, jobject thiz, jint mediatype) {
+	iMediaType = mediatype;
+}
 
 /* Instruct the native code to create its internal data structure, pipeline and thread */
 static void gst_native_init(JNIEnv* env, jobject thiz) {
@@ -696,31 +841,6 @@ static void gst_native_play(JNIEnv* env, jobject thiz) {
 
 	//check pipeline is ok(it generated in another thread)
 	// then go on
-	int nLoop = 20;
-	while (FALSE == data->initialized) {
-		usleep(200000);
-		nLoop--;
-		if (nLoop <= 0) {
-			__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
-					"inital gstreamer data timeout!");
-			break;
-		}
-	}
-
-	GstStateChangeReturn ret;
-
-	ret = gst_element_set_state(data->pipeline, GST_STATE_PLAYING);
-	if (ret == GST_STATE_CHANGE_FAILURE) {
-		g_print("Unable to set the pipeline to the playing state.\n");
-		return;
-	} else if (ret == GST_STATE_CHANGE_NO_PREROLL) {
-		g_print(" data.is_live = TRUE.\n");
-
-	} else if (ret == GST_STATE_CHANGE_SUCCESS) {
-		g_print(" GST_STATE_CHANGE_SUCCESS.\n");
-	}
-
-	g_print("rest is %d", ret);
 
 }
 
@@ -730,6 +850,7 @@ static void gst_native_pause(JNIEnv* env, jobject thiz) {
 	if (!data)
 		return;
 	GST_DEBUG("Setting state to PAUSED");
+	  data->target_state = GST_STATE_PAUSED;
 	gst_element_set_state(data->pipeline, GST_STATE_PAUSED);
 }
 
@@ -745,7 +866,12 @@ static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) 
 	unsigned char *chArr = (unsigned char *) ((*env)->GetByteArrayElements(env,
 			jbarray, 0));
 
-	time_t begin = time(NULL);
+	struct timeval t_start, t_end;
+
+	//get start time
+	gettimeofday(&t_start, NULL);
+	long begin = ((long) t_start.tv_sec) * 1000 + (long) t_start.tv_usec / 1000;
+
 	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "begin time is  %ld", begin);
 
 	//care number overflow!
@@ -759,6 +885,7 @@ static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) 
 		return;
 	}
 
+#if 0
 	if (NULL != pmutex) {
 		if (0 != pthread_mutex_lock(pmutex)) {
 			g_print("uupthread_mutex_lock fail!");
@@ -768,9 +895,10 @@ static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) 
 	} else {
 		g_print("pmutex is null!");
 	}
+#endif
 
 	in_index += nArrLen;
-
+#if 0
 	if (NULL != pmutex) {
 		if (0 != pthread_mutex_unlock(pmutex)) {
 			g_print("uupthread_mutex_UNlock fail!");
@@ -780,8 +908,10 @@ static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) 
 	} else {
 		g_print("pmutex is null!");
 	}
+#endif
+	gettimeofday(&t_end, NULL);
+	long end = ((long) t_end.tv_sec) * 1000 + (long) t_end.tv_usec / 1000;
 
-	time_t end = time(NULL);
 	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "end time is  %ld", end);
 
 	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "end-begin is  %ld",
@@ -803,8 +933,6 @@ static jboolean gst_native_setrecvlen(JNIEnv* env, jobject thiz, jlong jlen) {
 	recv_len = jlen;
 	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "play byteslen :%ld",
 			recv_len);
-
-	//gboolean ans = init_shmfile(env);
 
 	return TRUE;
 
@@ -831,6 +959,68 @@ static jboolean gst_native_class_init(JNIEnv* env, jclass klass) {
 	return JNI_TRUE;
 }
 
+static void gst_native_surface_init(JNIEnv *env, jobject thiz, jobject surface) {
+
+	g_print("gst_native_surface_init start");
+	if (1 != iMediaType) {
+		return;
+	}
+
+	CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
+	if (!data)
+		return;
+
+	ANativeWindow *new_native_window = ANativeWindow_fromSurface(env, surface);
+	g_print("Received surface %p (native window %p)", surface,
+			new_native_window);
+
+	if (data->native_window) {
+		ANativeWindow_release(data->native_window);
+		if (data->native_window == new_native_window) {
+			g_print("New native window is the same as the previous one");
+			if (data->pipeline) {
+				gst_x_overlay_expose(GST_X_OVERLAY(data->pipeline));
+				gst_x_overlay_expose(GST_X_OVERLAY(data->pipeline));
+			}
+			return;
+		} else {
+			g_print("Released previous native window %p", data->native_window);
+			data->initialized = FALSE;
+		}
+	}
+	data->native_window = new_native_window;
+
+	check_initialization_complete(data);
+}
+
+static void gst_native_surface_finalize(JNIEnv *env, jobject thiz) {
+
+	g_print("gst_native_surface_finalize start");
+	if (1 != iMediaType) {
+		return;
+	}
+
+	CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
+	if (!data)
+		return;
+
+	if (NULL == data->native_window) {
+		return;
+	}
+
+	g_print("Releasing Native Window %p", data->native_window);
+
+	if (data->pipeline) {
+		gst_x_overlay_set_window_handle(GST_X_OVERLAY(data->pipeline),
+				(guintptr) NULL);
+		gst_element_set_state(data->pipeline, GST_STATE_READY);
+	}
+
+	ANativeWindow_release(data->native_window);
+	data->native_window = NULL;
+	data->initialized = FALSE;
+}
+
 /* List of implemented native methods */
 static JNINativeMethod native_methods[] = { { "nativeInit", "()V",
 		(void *) gst_native_init }, { "nativeFinalize", "()V",
@@ -838,8 +1028,13 @@ static JNINativeMethod native_methods[] = { { "nativeInit", "()V",
 		(void *) gst_native_play }, { "nativePause", "()V",
 		(void *) gst_native_pause }, { "nativeInputData", "([B)V",
 		(void *) gst_native_inputdata }, { "nativeSetRecvLen", "(J)Z",
-		(void *) gst_native_setrecvlen }, { "nativeClassInit", "()Z",
-		(void *) gst_native_class_init } };
+		(void *) gst_native_setrecvlen }, { "nativeSetChunkSize", "(I)V",
+				(void *) gst_native_set_chunksize },{ "nativeSetMediaType", "(I)V",
+		(void *) gst_native_set_mediatype }, { "nativeSetBuffScale", "(I)V",
+		(void *) gst_native_set_prebuff_scale }, { "nativeSurfaceInit",
+		"(Ljava/lang/Object;)V", (void *) gst_native_surface_init }, {
+		"nativeSurfaceFinalize", "()V", (void *) gst_native_surface_finalize },
+		{ "nativeClassInit", "()Z", (void *) gst_native_class_init } };
 
 /* Library initializer */
 jint JNI_OnLoad(JavaVM *vm, void *reserved) {
