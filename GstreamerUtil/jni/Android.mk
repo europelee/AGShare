@@ -8,6 +8,7 @@ LOCAL_SHARED_LIBRARIES := gstreamer_android
 LOCAL_LDLIBS := -llog -landroid
 include $(BUILD_SHARED_LIBRARY)
 
+
 ifndef GSTREAMER_SDK_ROOT
 ifndef GSTREAMER_SDK_ROOT_ANDROID
 $(error GSTREAMER_SDK_ROOT_ANDROID is not defined!)

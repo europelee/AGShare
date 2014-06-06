@@ -30,7 +30,9 @@ GST_DEBUG_CATEGORY_STATIC( debug_category);
 # define SET_CUSTOM_DATA(env, thiz, fieldID, data) (*env)->SetLongField (env, thiz, fieldID, (jlong)(jint)data)
 #endif
 
-static unsigned long CHUNK_SIZE=1024*256;    /* Amount of bytes we are sending in each buffer */
+#define EN_MUTEX 1
+
+static unsigned long CHUNK_SIZE = 1024 * 256; /* Amount of bytes we are sending in each buffer */
 
 /* Structure to contain all our information, so we can pass it to callbacks */
 typedef struct _CustomData {
@@ -46,9 +48,17 @@ typedef struct _CustomData {
 
 /* playbin2 flags */
 typedef enum {
-	GST_PLAY_FLAG_VIDEO = (1 << 0), /* We want video output */
-	GST_PLAY_FLAG_AUDIO = (1 << 1), /* We want audio output */
-	GST_PLAY_FLAG_TEXT = (1 << 2) /* We want subtitle output */
+	GST_PLAY_FLAG_VIDEO = (1 << 0),
+	GST_PLAY_FLAG_AUDIO = (1 << 1),
+	GST_PLAY_FLAG_TEXT = (1 << 2),
+	GST_PLAY_FLAG_VIS = (1 << 3),
+	GST_PLAY_FLAG_SOFT_VOLUME = (1 << 4),
+	GST_PLAY_FLAG_NATIVE_AUDIO = (1 << 5),
+	GST_PLAY_FLAG_NATIVE_VIDEO = (1 << 6),
+	GST_PLAY_FLAG_DOWNLOAD = (1 << 7),
+	GST_PLAY_FLAG_BUFFERING = (1 << 8),
+	GST_PLAY_FLAG_DEINTERLACE = (1 << 9),
+	GST_PLAY_FLAG_SOFT_COLORBALANCE = (1 << 10)
 } GstPlayFlags;
 
 /* These global variables cache values which are not changing during execution */
@@ -75,9 +85,14 @@ static unsigned long out_index = 0;
 
 // Mutex instance
 static pthread_mutex_t * pmutex = NULL;
+static pthread_cond_t cont_prebuff;
+static pthread_cond_t cont_pushbuff;
 
 static int iMediaType = 0; //0: audio, 1: video
 static int iPreBuff = 0; // 0-100
+static unsigned long nBuff = 0;
+static gboolean hunstatus = FALSE;
+
 /*
  * Private methods
  */
@@ -221,36 +236,39 @@ static gboolean push_data(CustomData *data) {
 	} else {
 		int nLoop = 60;
 		while (1) {
-#if 0
-			if (NULL != pmutex) {
-				if (0 != pthread_mutex_lock(pmutex)) {
-					g_print("uupthread_mutex_lock fail!");
-				} else {
-					g_print("uupthread_mutex_lock succ!");
-				}
-			} else {
-				g_print("pmutex is null!");
-			}
-#endif
+
 			unsigned long in_indexcp = in_index;
-#if 0
-			if (NULL != pmutex) {
-				if (0 != pthread_mutex_unlock(pmutex)) {
-					g_print("uupthread_mutex_UNlock fail!");
-				} else {
-					g_print("uupthread_mutex_UNlock succ!");
-				}
-			} else {
-				g_print("pmutex is null!");
-			}
-#endif
+
 			if (out_index + CHUNK_SIZE > in_indexcp) {
 
 				__android_log_print(ANDROID_LOG_INFO, TAGSTR,
 						"buff readable is empty!");
+				hunstatus = TRUE;
+#if EN_MUTEX
+				if (NULL != pmutex) {
+					if (0 != pthread_mutex_lock(pmutex)) {
+						g_print("uupthread_mutex_lock fail!");
+					} else {
+						g_print("uupthread_mutex_lock succ!");
+					}
+				} else {
+					g_print("pmutex is null!");
+				}
+#endif
+				//wait
+				pthread_cond_wait(&cont_pushbuff, pmutex);
 
-				//int delta = 6 - 6 * (in_indexcp - out_index + 1) / CHUNK_SIZE;
-				sleep(1);
+#if EN_MUTEX
+				if (NULL != pmutex) {
+					if (0 != pthread_mutex_unlock(pmutex)) {
+						g_print("uupthread_mutex_UNlock fail!");
+					} else {
+						g_print("uupthread_mutex_UNlock succ!");
+					}
+				} else {
+					g_print("pmutex is null!");
+				}
+#endif
 				nLoop--;
 				if (nLoop <= 0) {
 					__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
@@ -267,6 +285,7 @@ static gboolean push_data(CustomData *data) {
 
 				__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
 						"spend %d s for getting CHUNK_SIZE data", (60 - nLoop));
+				hunstatus = FALSE;
 				break;
 			}
 
@@ -276,15 +295,12 @@ static gboolean push_data(CustomData *data) {
 
 	}
 
-	if (100 == iPreBuff)
-	{
+	if (100 == iPreBuff) {
 		nRead = recv_len;
-		 if (madvise (head_maped + out_index, nRead, MADV_SEQUENTIAL) < 0) {
-			 g_print( "warning: madvise failed: %s",
-					 g_strerror (errno));
+		if (madvise(head_maped + out_index, nRead, MADV_SEQUENTIAL) < 0) {
+			g_print("warning: madvise failed: %s", g_strerror(errno));
 
-		 }
-		 sleep(5);
+		}
 	}
 
 	buffer = gst_buffer_new();
@@ -300,11 +316,10 @@ static gboolean push_data(CustomData *data) {
 	}
 
 	/* Push the buffer into the appsrc */
-	//g_signal_emit_by_name(data->app_source, "push-buffer", buffer, &ret);
-	ret = gst_app_src_push_buffer(data->app_source, buffer);
+	g_signal_emit_by_name(data->app_source, "push-buffer", buffer, &ret);
+	//ret = gst_app_src_push_buffer(data->app_source, buffer);
 	/* Free the buffer now that we are done with it */
-	//gst_buffer_unref(buffer);
-
+	gst_buffer_unref(buffer);
 	if (ret != GST_FLOW_OK) {
 		/* We got some error, stop sending data */
 		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
@@ -346,6 +361,7 @@ static void source_setup(GstElement *pipeline, GstElement *source,
 	//any means any
 	GstCaps * gany;
 	gany = gst_caps_new_any();
+	//gst_caps_from_string ("video/*,framerate=24,bitrate=(uint)2980000, width=(int)1280,height=(int)720");
 	g_object_set(source, "caps", gany, NULL);
 	gst_caps_unref(gany);
 
@@ -354,18 +370,15 @@ static void source_setup(GstElement *pipeline, GstElement *source,
 	 * can but it's not required.
 	 */
 	g_object_set(source, "size", (gint64) recv_len, NULL);
-	g_print("source size is %lld", gst_app_src_get_size () );
+	g_print("source size is %d", gst_app_src_get_size());
 
-	if (100 != iPreBuff)
-	{
-	g_object_set(source, "max-bytes", (gint64)(2*CHUNK_SIZE), NULL);
-	g_print("max-bytes: %d", gst_app_src_get_max_bytes(source));
+	if (100 != iPreBuff) {
+		g_object_set(source, "max-bytes", (gint64)(4 * CHUNK_SIZE), NULL);
+		g_print("max-bytes: %d", gst_app_src_get_max_bytes(source));
 
-	g_object_set(source, "min-percent", 60, NULL);
-	}
-	else
-	{
-		g_object_set(source, "max-bytes", (gint64)0, NULL);
+		g_object_set(source, "min-percent", 60, NULL);
+	} else {
+		g_object_set(source, "max-bytes", (gint64) 0, NULL);
 		g_print("max-bytes: %d", gst_app_src_get_max_bytes(source));
 	}
 
@@ -375,13 +388,101 @@ static void source_setup(GstElement *pipeline, GstElement *source,
 }
 
 static void buffering_cb(GstBus *bus, GstMessage *msg, CustomData *data) {
+#if 0
+	static int itest = 0;
+	static int b0 = 0, b1 = 0, b2 = 0, b3 = 0;
+
+	if (0 == itest)
+	{
+
+		GstElement *vbin = gst_bin_get_by_name(GST_BIN(data->pipeline), "vbin");
+		if (NULL != vbin && b0 == 0)
+		{
+			g_print("vbin is not null");
+			b0 = 1;
+			gst_object_unref(vbin);
+
+		}
+		GstElement *vqueue = gst_bin_get_by_name(GST_BIN(data->pipeline), "vqueue");
+		if (NULL != vqueue && 0 == b1)
+		{
+			g_print("vqueue is not null");
+
+			b1 =1;
+
+			g_object_set(vqueue, "max-size-buffers", 8, NULL);
+			guint tmp;
+			g_object_get(vqueue, "max-size-buffers", &tmp, NULL);
+			g_print(" vqueue max-size-buffers %u ", tmp);
+
+			g_object_set(vqueue, "max-size-bytes", 1024*1024*8, NULL);
+			g_object_get(vqueue, "max-size-bytes", &tmp, NULL);
+			g_print(" vqueue max-size-bytes %u ", tmp);
+
+			gst_object_unref(vqueue);
+		}
+
+		GstElement *multiqueue = gst_bin_get_by_name(GST_BIN(data->pipeline), "multiqueue0");
+		if (NULL != multiqueue && 0 == b2)
+		{
+			g_print("multiqueue is not null");
+
+			b2 = 1;
+
+			g_object_set(multiqueue, "use-buffering", (gboolean)TRUE, NULL);
+
+			g_object_set(multiqueue, "max-size-buffers", 8, NULL);
+			guint tmp;
+			g_object_get(multiqueue, "max-size-buffers", &tmp, NULL);
+			g_print("max-size-buffers %u ", tmp);
+
+			g_object_set(multiqueue, "max-size-bytes", 1024*1024*8, NULL);
+			g_object_get(multiqueue, "max-size-bytes", &tmp, NULL);
+			g_print("max-size-bytes %u ", tmp);
+
+			gst_object_unref(multiqueue);
+
+		}
+
+		GstElement *decodebin = gst_bin_get_by_name(GST_BIN(data->pipeline), "decodebin0");
+		if (NULL != decodebin && 0 == b3)
+		{
+			g_print("decodebin is not null");
+
+			b3 = 1;
+
+			g_object_set(decodebin, "use-buffering", (gboolean)TRUE, NULL);
+			g_object_set(decodebin, "low-percent", 10, NULL);
+			g_object_set(decodebin, "high-percent", 99, NULL);
+			g_object_set(decodebin, "max-size-buffers", 8, NULL);
+			guint tmp;
+			g_object_get(decodebin, "max-size-buffers", &tmp, NULL);
+			g_print("decodebin max-size-buffers %u ", tmp);
+
+			g_object_set(decodebin, "max-size-bytes", 1024*1024*64, NULL);
+			g_object_get(decodebin, "max-size-bytes", &tmp, NULL);
+			g_print("decodebin max-size-bytes %u ", tmp);
+
+			g_object_set(decodebin, "max-size-time", (guint64)4000000000, NULL);
+
+			gst_object_unref(decodebin);
+
+		}
+
+		if (1 == b0 && 1 == b1 && 1 == b2 && 1 == b3)
+		itest = 1;
+	}
+#endif
 	gint percent;
 
+	//g_print("buff_cb: target_state %d(play:%d)", data->target_state,
+	//		GST_STATE_PLAYING);
 	gst_message_parse_buffering(msg, &percent);
-
+	g_print("percent:%d", percent);
 	if (percent < 100 && data->target_state >= GST_STATE_PAUSED) {
 		gchar * message_string = g_strdup_printf("Buffering %d%%", percent);
 		gst_element_set_state(data->pipeline, GST_STATE_PAUSED);
+
 		set_ui_message(message_string, data);
 		g_free(message_string);
 	} else if (data->target_state >= GST_STATE_PLAYING) {
@@ -408,8 +509,6 @@ static void error_cb(GstBus *bus, GstMessage *msg, CustomData *data) {
 	gst_element_set_state(data->pipeline, GST_STATE_NULL);
 }
 
-
-
 /* Notify UI about pipeline state changes */
 static void state_changed_cb(GstBus *bus, GstMessage *msg, CustomData *data) {
 	GstState old_state, new_state, pending_state;
@@ -421,13 +520,15 @@ static void state_changed_cb(GstBus *bus, GstMessage *msg, CustomData *data) {
 		g_print("state_changed_cb: %s\n",
 				gst_element_state_get_name(new_state));
 
-		gchar *message = g_strdup_printf("State changed to %s",
-				gst_element_state_get_name(new_state));
+		gchar *message = g_strdup_printf("State changed to %s from %s",
+				gst_element_state_get_name(new_state),
+				gst_element_state_get_name(old_state));
 		set_ui_message(message, data);
 		g_free(message);
 	} else {
-		g_print("msg from %s, state changed to %s\n",
+		g_print("msg from %s, state %s changed to %s\n",
 				GST_OBJECT_NAME(GST_MESSAGE_SRC(msg)),
+				gst_element_state_get_name(old_state),
 				gst_element_state_get_name(new_state));
 
 	}
@@ -460,6 +561,13 @@ static void check_initialization_complete(CustomData *data) {
 	}
 }
 
+static void clock_lost_cb(GstBus *bus, GstMessage *msg, CustomData *data) {
+	if (data->target_state >= GST_STATE_PLAYING) {
+		gst_element_set_state(data->pipeline, GST_STATE_PAUSED);
+		gst_element_set_state(data->pipeline, GST_STATE_PLAYING);
+	}
+}
+
 static void eos_cb(GstBus *bus, GstMessage *msg, CustomData *data) {
 
 	g_print("eos_cb called!");
@@ -479,29 +587,16 @@ static void *app_function(void *userdata) {
 	out_index = 0;
 
 	guint flags;
-	// Initialize mutex
-	//it need this thread start first before alljoyn calling input data
-	if (NULL != pmutex) {
-		free(pmutex);
-		pmutex = NULL;
-	}
-
-	pmutex = (pthread_mutex_t *) malloc(sizeof(pthread_mutex_t));
-
-	if (0 != pthread_mutex_init(pmutex, NULL)) {
-
-		g_print("pthread_mutex_init fail!");
-
-	} else {
-		g_print("pthread_mutex_init succ!");
-	}
-
-	unsigned long nBuff = recv_len * ((float) iPreBuff / 100);
-	g_print("nBuff is %lu", nBuff);
 
 	while (1) {
-		g_print("buff some content before play!");
-#if 0
+		g_print("buff some content before playing!");
+
+		if (1 == iEnd) {
+			g_print("unexception error!");
+			break;
+		}
+
+#if EN_MUTEX
 		if (NULL != pmutex) {
 			if (0 != pthread_mutex_lock(pmutex)) {
 				g_print("uupthread_mutex_lock fail!");
@@ -513,8 +608,17 @@ static void *app_function(void *userdata) {
 		}
 #endif
 		unsigned long in_indexcp = in_index;
+		if (in_indexcp >= nBuff) {
+			//break;
+		} else {
+			//sleep(1);
+			if (NULL != pmutex)
+				pthread_cond_wait(&cont_prebuff, pmutex);
+		}
 
-#if 0
+		//avoid inject function always calling cont-signal
+		nBuff = 0;
+#if EN_MUTEX
 		if (NULL != pmutex) {
 			if (0 != pthread_mutex_unlock(pmutex)) {
 				g_print("uupthread_mutex_UNlock fail!");
@@ -525,17 +629,8 @@ static void *app_function(void *userdata) {
 			g_print("pmutex is null!");
 		}
 #endif
-		if (1 == iEnd)
-		{
-			g_print("unexception error!");
 
-			break;
-		}
-		if (in_indexcp >= nBuff) {
-			break;
-		} else {
-			sleep(1);
-		}
+		break;
 	}
 	//
 	JavaVMAttachArgs args;
@@ -561,26 +656,26 @@ static void *app_function(void *userdata) {
 		set_ui_message(message, data);
 		g_free(message);
 
-		// Destory mutex
-		if ((NULL != pmutex) && (0 != pthread_mutex_destroy(pmutex))) {
-			g_print("pthread_mutex_destroy fail!");
-		} else {
-			g_print("pthread_mutex_destroy succ!");
-		}
-
-		if (NULL != pmutex) {
-			free(pmutex);
-			pmutex = NULL;
-		}
-
 		return NULL;
 	}
 
 	/* Disable subtitles */
 	g_object_get(data->pipeline, "flags", &flags, NULL);
-	flags |= GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_AUDIO;
+	flags |= GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_AUDIO
+			| GST_PLAY_FLAG_BUFFERING;
+	//| GST_PLAY_FLAG_DOWNLOAD;
 	flags &= ~GST_PLAY_FLAG_TEXT;
 	g_object_set(data->pipeline, "flags", flags, NULL);
+
+	g_object_set(data->pipeline, "buffer-duration", G_MAXUINT, NULL);
+	gint64 tmp0;
+	g_object_get(data->pipeline, "buffer-duration", &tmp0, NULL);
+	g_print("buffer-dur is %lld s", tmp0 / 1000000000);
+
+	g_object_set(data->pipeline, "buffer-size", 1024 * 1024 * 6, NULL);
+	guint tmp;
+	g_object_get(data->pipeline, "buffer-size", &tmp, NULL);
+	g_print("buffer-size is %u Megabytes", tmp / (1024 * 1024));
 
 	data->target_state = GST_STATE_READY;
 	gst_element_set_state(data->pipeline, GST_STATE_READY);
@@ -605,6 +700,8 @@ static void *app_function(void *userdata) {
 
 	g_signal_connect(G_OBJECT(bus), "message::buffering",
 			(GCallback) buffering_cb, data);
+	g_signal_connect(G_OBJECT(bus), "message::clock-lost",
+			(GCallback) clock_lost_cb, data);
 	gst_object_unref(bus);
 
 	/* Create a GLib Main Loop and set it to run */
@@ -628,7 +725,7 @@ static void *app_function(void *userdata) {
 		g_print(" GST_STATE_CHANGE_SUCCESS.\n");
 	}
 
-	g_print("rest is %d", ret);
+	g_print("ret is %d", ret);
 
 	g_main_loop_run(data->main_loop);
 
@@ -645,20 +742,9 @@ static void *app_function(void *userdata) {
 
 	fin_shmfile();
 
-	// Destory mutex
-	if ((NULL != pmutex) && (0 != pthread_mutex_destroy(pmutex))) {
-		g_print("pthread_mutex_destroy fail!");
-	} else {
-		g_print("pthread_mutex_destroy succ!");
-	}
-
-	if (NULL != pmutex) {
-		free(pmutex);
-		pmutex = NULL;
-	}
-
 	in_index = 0;
 	out_index = 0;
+	hunstatus = FALSE;
 
 	return NULL;
 }
@@ -745,8 +831,7 @@ static gboolean init_shmfile(JNIEnv* env) {
 /*
  * Java Bindings
  */
-static void gst_native_set_chunksize(JNIEnv* env, jobject thiz, jint csize)
-{
+static void gst_native_set_chunksize(JNIEnv* env, jobject thiz, jint csize) {
 	CHUNK_SIZE = csize;
 }
 
@@ -757,6 +842,14 @@ static void gst_native_set_prebuff_scale(JNIEnv* env, jobject thiz, jint scale) 
 		scale = 100;
 
 	iPreBuff = scale;
+
+	//need first set recv_len
+	nBuff = recv_len * ((float) iPreBuff / 100);
+	g_print("nBuff is %lu, recv_len:%lu", nBuff, recv_len);
+	//above not acculate, so
+	if (nBuff > recv_len)
+		nBuff = recv_len;
+
 }
 
 static void gst_native_set_mediatype(JNIEnv* env, jobject thiz, jint mediatype) {
@@ -779,6 +872,28 @@ static void gst_native_init(JNIEnv* env, jobject thiz) {
 
 	//pthread_create(&gst_app_thread, NULL, &app_function, data);
 
+	// Initialize mutex
+	//it need this thread start first before alljoyn calling input data
+#if EN_MUTEX
+	if (NULL != pmutex) {
+		free(pmutex);
+		pmutex = NULL;
+	}
+
+	pmutex = (pthread_mutex_t *) malloc(sizeof(pthread_mutex_t));
+
+	if (0 != pthread_mutex_init(pmutex, NULL)) {
+
+		g_print("pthread_mutex_init fail!");
+
+	} else {
+		g_print("pthread_mutex_init succ!");
+	}
+#endif
+
+	pthread_cond_init(&cont_prebuff, NULL);
+	pthread_cond_init(&cont_pushbuff, NULL);
+
 }
 
 /* Quit the main loop, remove the native thread and free resources */
@@ -799,6 +914,20 @@ static void gst_native_finalize(JNIEnv* env, jobject thiz) {
 
 	//anothread may use fd, so join it first
 	fin_shmfile();
+
+	// Destory mutex
+#if EN_MUTEX
+	if ((NULL != pmutex) && (0 != pthread_mutex_destroy(pmutex))) {
+		g_print("pthread_mutex_destroy fail!");
+	} else {
+		g_print("pthread_mutex_destroy succ!");
+	}
+
+	if (NULL != pmutex) {
+		free(pmutex);
+		pmutex = NULL;
+	}
+#endif
 
 	GST_DEBUG("Deleting GlobalRef for app object at %p", data->app);
 	(*env)->DeleteGlobalRef(env, data->app);
@@ -850,7 +979,7 @@ static void gst_native_pause(JNIEnv* env, jobject thiz) {
 	if (!data)
 		return;
 	GST_DEBUG("Setting state to PAUSED");
-	  data->target_state = GST_STATE_PAUSED;
+	data->target_state = GST_STATE_PAUSED;
 	gst_element_set_state(data->pipeline, GST_STATE_PAUSED);
 }
 
@@ -868,12 +997,13 @@ static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) 
 
 	struct timeval t_start, t_end;
 
+#if ( defined(NDK_DEBUG) && ( NDK_DEBUG == 1 ) )
 	//get start time
 	gettimeofday(&t_start, NULL);
 	long begin = ((long) t_start.tv_sec) * 1000 + (long) t_start.tv_usec / 1000;
 
 	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "begin time is  %ld", begin);
-
+#endif
 	//care number overflow!
 	if (in_index + nArrLen <= recv_len)
 		memcpy(head_maped + in_index, chArr, nArrLen);
@@ -881,34 +1011,70 @@ static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) 
 		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
 				"in_index+nArrLen %ld > recv_len %ld", in_index + nArrLen,
 				recv_len);
-
+		(*env)->ReleaseByteArrayElements(env, jbarray, chArr, 0);
 		return;
 	}
 
-#if 0
-	if (NULL != pmutex) {
-		if (0 != pthread_mutex_lock(pmutex)) {
-			g_print("uupthread_mutex_lock fail!");
-		} else {
-			g_print("uupthread_mutex_lock succ!");
-		}
-	} else {
-		g_print("pmutex is null!");
-	}
-#endif
-
 	in_index += nArrLen;
-#if 0
-	if (NULL != pmutex) {
-		if (0 != pthread_mutex_unlock(pmutex)) {
-			g_print("uupthread_mutex_UNlock fail!");
+
+	if (nBuff > 0 && in_index >= nBuff) {
+#if EN_MUTEX
+		if (NULL != pmutex) {
+			if (0 != pthread_mutex_lock(pmutex)) {
+				g_print("uupthread_mutex_lock fail!");
+			} else {
+				g_print("uupthread_mutex_lock succ!");
+			}
 		} else {
-			g_print("uupthread_mutex_UNlock succ!");
+			g_print("pmutex is null!");
 		}
-	} else {
-		g_print("pmutex is null!");
-	}
 #endif
+		g_print("trigger app_function continuing!");
+		if (NULL != pmutex)
+			pthread_cond_signal(&cont_prebuff);
+
+#if EN_MUTEX
+		if (NULL != pmutex) {
+			if (0 != pthread_mutex_unlock(pmutex)) {
+				g_print("uupthread_mutex_UNlock fail!");
+			} else {
+				g_print("uupthread_mutex_UNlock succ!");
+			}
+		} else {
+			g_print("pmutex is null!");
+		}
+#endif
+	}
+
+	if (TRUE == hunstatus && out_index + CHUNK_SIZE <= in_index) {
+#if EN_MUTEX
+		if (NULL != pmutex) {
+			if (0 != pthread_mutex_lock(pmutex)) {
+				g_print("uupthread_mutex_lock fail!");
+			} else {
+				g_print("uupthread_mutex_lock succ!");
+			}
+		} else {
+			g_print("pmutex is null!");
+		}
+#endif
+		g_print("trigger push_data");
+		pthread_cond_signal(&cont_pushbuff);
+
+#if EN_MUTEX
+		if (NULL != pmutex) {
+			if (0 != pthread_mutex_unlock(pmutex)) {
+				g_print("uupthread_mutex_UNlock fail!");
+			} else {
+				g_print("uupthread_mutex_UNlock succ!");
+			}
+		} else {
+			g_print("pmutex is null!");
+		}
+#endif
+	}
+
+#if ( defined(NDK_DEBUG) && ( NDK_DEBUG == 1 ) )
 	gettimeofday(&t_end, NULL);
 	long end = ((long) t_end.tv_sec) * 1000 + (long) t_end.tv_usec / 1000;
 
@@ -916,7 +1082,7 @@ static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) 
 
 	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "end-begin is  %ld",
 			(long) end - (long) begin);
-
+#endif
 	//
 
 	if (in_index == recv_len) {
@@ -1029,7 +1195,7 @@ static JNINativeMethod native_methods[] = { { "nativeInit", "()V",
 		(void *) gst_native_pause }, { "nativeInputData", "([B)V",
 		(void *) gst_native_inputdata }, { "nativeSetRecvLen", "(J)Z",
 		(void *) gst_native_setrecvlen }, { "nativeSetChunkSize", "(I)V",
-				(void *) gst_native_set_chunksize },{ "nativeSetMediaType", "(I)V",
+		(void *) gst_native_set_chunksize }, { "nativeSetMediaType", "(I)V",
 		(void *) gst_native_set_mediatype }, { "nativeSetBuffScale", "(I)V",
 		(void *) gst_native_set_prebuff_scale }, { "nativeSurfaceInit",
 		"(Ljava/lang/Object;)V", (void *) gst_native_surface_init }, {
