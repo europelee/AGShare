@@ -88,6 +88,7 @@ public class EndPtService extends Service implements ServiceConfig
 	// to same sessionid
 	HashMap<Long, ArrayList<String>> mClientList = new HashMap<Long, ArrayList<String>>();
 
+	
 	/**
 	 * 
 	 * @Title: getClientList
@@ -444,7 +445,9 @@ public class EndPtService extends Service implements ServiceConfig
 			Log.i(TAG, String.format(
 					"MyBusListener.lostAdvertisedName(%s, 0x%04x, %s)", name,
 					transport, namePrefix));
-			mIsjoinSession = false;
+			Log.i(TAG, "because of session-based, so ignore the above lost-info msg");
+			//because session-based, so dont need set mIsjoinSession = false
+			//mIsjoinSession = false;
 
 		}
 
@@ -745,6 +748,7 @@ public class EndPtService extends Service implements ServiceConfig
 
 		if (ServiceRole.CLIENT_END == mRole)// ugly
 		{
+			//mServiceName is  NAME_PREFIX of mSerGUIDName
 			status = mBus.findAdvertisedName(mServiceName);
 			logStatus("BusAttachement.findAdvertisedName " + mServiceName,
 					status);

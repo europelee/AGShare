@@ -12,3 +12,4 @@ GstreamerUtil/obj
 GstreamerUtil/libs/armeabi
 TestUPnP/libs/armeabi
 TestUPnP/libs/gstreamerutil.jar
+GstreamerUtil/gst-build-armeabi
