@@ -19,6 +19,6 @@ by alljoyn(Communication capability) and Gstreamer(media han-
 dling technology), you can try it with TestUPnP, enjoy multi-
 media sharing.    
    
-the master branch use gstreamer0.10.36, when video playing, 720p   
+2014-6-13 the master branch use gstreamer0.10.36, when video playing, 720p   
 is ok, but 1080p is not good, so I will create a branch named HDIm   
 with latest gstreamer, try to improve 1080p playing.
