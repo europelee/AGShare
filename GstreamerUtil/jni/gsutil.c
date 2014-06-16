@@ -10,8 +10,9 @@
 #include <unistd.h>
 #include<sys/types.h>
 #include <sys/mman.h>
-#include <gst/interfaces/xoverlay.h>
+
 #include <gst/video/video.h>
+#include <gst/video/videooverlay.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -303,9 +304,24 @@ static gboolean push_data(CustomData *data) {
 		}
 	}
 
-	buffer = gst_buffer_new();
+	//buffer = gst_buffer_new();
+     buffer = gst_buffer_new_wrapped_full(GST_MEMORY_FLAG_READONLY, head_maped+out_index,
+    		 nRead, 0, nRead,NULL, NULL);
+	//replace with gst_buffer_insert_memory when gstreamer 1.x
+#if 0
 	GST_BUFFER_DATA (buffer) = head_maped + out_index;
 	GST_BUFFER_SIZE (buffer) = nRead;
+#endif
+
+	//refer tests/check/gst/Gstbuffer.c create_read_only_buffer
+	/* assign some read-only data to the new buffer */
+	/*
+	gst_buffer_insert_memory(buffer, -1,
+			gst_memory_new_wrapped(GST_MEMORY_FLAG_READONLY,
+					(gpointer) (head_maped), nRead, out_index,
+					nRead, NULL, NULL));
+	 */
+	g_print("gst_buffer_get_size %d", gst_buffer_get_size(buffer));
 
 	out_index += nRead; //CHUNK_SIZE
 
@@ -358,13 +374,16 @@ static void source_setup(GstElement *pipeline, GstElement *source,
 	g_print("Source has been created. Configuring.\n");
 	data->app_source = source; /* Configure appsrc */
 
+	//gstreamer 0.10.36 is ok, but 1.x gst_caps_new_any has bug
+	//test with gst_caps_is_any.
+	//already file bug https://bugzilla.gnome.org/show_bug.cgi?id=731704
 	//any means any
+#if 0
 	GstCaps * gany;
 	gany = gst_caps_new_any();
-	//gst_caps_from_string ("video/*,framerate=24,bitrate=(uint)2980000, width=(int)1280,height=(int)720");
 	g_object_set(source, "caps", gany, NULL);
 	gst_caps_unref(gany);
-
+#endif
 	/* we can set the length in appsrc. This allows some elements to estimate the
 	 * total duration of the stream. It's a good idea to set the property when you
 	 * can but it's not required.
@@ -547,7 +566,7 @@ static void check_initialization_complete(CustomData *data) {
 		if (1 == iMediaType && data->native_window) {
 			g_print("set draw window for pipeline");
 			/* The main loop is running and we received a native window, inform the sink about it */
-			gst_x_overlay_set_window_handle(GST_X_OVERLAY(data->pipeline),
+			gst_video_overlay_set_window_handle(GST_VIDEO_OVERLAY(data->pipeline),
 					(guintptr) data->native_window);
 
 		}
@@ -581,6 +600,7 @@ static void eos_cb(GstBus *bus, GstMessage *msg, CustomData *data) {
 /* Main method for the native code. This is executed on its own thread. */
 static void *app_function(void *userdata) {
 
+	gst_debug_set_default_threshold(GST_LEVEL_DEBUG);
 	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "app_function start");
 
 	in_index = 0;
@@ -647,8 +667,8 @@ static void *app_function(void *userdata) {
 	g_main_context_push_thread_default(data->context);
 
 	/* Build pipeline */
-	data->pipeline = gst_parse_launch("playbin2 uri=appsrc://", &error);
-
+	//data->pipeline = gst_parse_launch("playbin uri=appsrc://", &error);
+	data->pipeline = gst_parse_launch("playbin", &error);
 	if (error) {
 		gchar *message = g_strdup_printf("Unable to build pipeline: %s",
 				error->message);
@@ -659,10 +679,13 @@ static void *app_function(void *userdata) {
 		return NULL;
 	}
 
+	g_signal_connect(data->pipeline, "source-setup", G_CALLBACK(source_setup),
+			data);
+
 	/* Disable subtitles */
 	g_object_get(data->pipeline, "flags", &flags, NULL);
 	flags |= GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_AUDIO
-			| GST_PLAY_FLAG_BUFFERING;
+		     | GST_PLAY_FLAG_BUFFERING;
 	//| GST_PLAY_FLAG_DOWNLOAD;
 	flags &= ~GST_PLAY_FLAG_TEXT;
 	g_object_set(data->pipeline, "flags", flags, NULL);
@@ -680,8 +703,8 @@ static void *app_function(void *userdata) {
 	data->target_state = GST_STATE_READY;
 	gst_element_set_state(data->pipeline, GST_STATE_READY);
 
-	g_signal_connect(data->pipeline, "source-setup", G_CALLBACK(source_setup),
-			data);
+	g_object_set(data->pipeline, "uri", "appsrc://", NULL);
+
 
 	/* Instruct the bus to emit signals for each received message, and connect to the interesting signals */
 	bus = gst_element_get_bus(data->pipeline);
@@ -1145,8 +1168,8 @@ static void gst_native_surface_init(JNIEnv *env, jobject thiz, jobject surface) 
 		if (data->native_window == new_native_window) {
 			g_print("New native window is the same as the previous one");
 			if (data->pipeline) {
-				gst_x_overlay_expose(GST_X_OVERLAY(data->pipeline));
-				gst_x_overlay_expose(GST_X_OVERLAY(data->pipeline));
+				gst_video_overlay_expose(GST_VIDEO_OVERLAY(data->pipeline));
+				gst_video_overlay_expose(GST_VIDEO_OVERLAY(data->pipeline));
 			}
 			return;
 		} else {
@@ -1177,7 +1200,7 @@ static void gst_native_surface_finalize(JNIEnv *env, jobject thiz) {
 	g_print("Releasing Native Window %p", data->native_window);
 
 	if (data->pipeline) {
-		gst_x_overlay_set_window_handle(GST_X_OVERLAY(data->pipeline),
+		gst_video_overlay_set_window_handle(GST_VIDEO_OVERLAY(data->pipeline),
 				(guintptr) NULL);
 		gst_element_set_state(data->pipeline, GST_STATE_READY);
 	}
