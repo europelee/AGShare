@@ -33,6 +33,8 @@ GST_DEBUG_CATEGORY_STATIC( debug_category);
 
 #define EN_MUTEX 1
 
+#define SNAP_CAPS "video/x-raw,format=RGB,width=%d,pixel-aspect-ratio=1/1"
+
 static unsigned long CHUNK_SIZE = 1024 * 256; /* Amount of bytes we are sending in each buffer */
 
 /* Structure to contain all our information, so we can pass it to callbacks */
@@ -45,6 +47,14 @@ typedef struct _CustomData {
 	GstElement *app_source;
 	ANativeWindow *native_window; /* The Android native window where video will be rendered */
 	GstState target_state;
+	//ADD for app layer getting media info
+	//refer http://docs.gstreamer.com/display/GstSDK/Playback+tutorial+2%3A+Subtitle+management
+	gint n_video; /* Number of embedded video streams */
+	gint n_audio; /* Number of embedded audio streams */
+	gint n_text; /* Number of embedded subtitle streams */
+	gint current_video; /* Currently playing video stream */
+	gint current_audio; /* Currently playing audio stream */
+	gint current_text; /* Currently playing subtitle stream */
 } CustomData;
 
 /* playbin2 flags */
@@ -75,6 +85,7 @@ static int iEnd = 1;
 static const char * TAGSTR = "gsutil";
 
 static char SHM_FILE[PATH_MAX] = { 0 };
+static char SDCARD_PREFIX[PATH_MAX] = { 0 };
 
 static unsigned char *head_maped = NULL;
 
@@ -197,6 +208,97 @@ static void fin_shmfile() {
 	}
 }
 
+/**
+ * copy from test/Read-metadata.c
+ */
+static void print_tag(const GstTagList * list, const gchar * tag,
+		gpointer unused) {
+	gint i, count;
+	g_print("tag:%s\n", tag);
+
+	count = gst_tag_list_get_tag_size(list, tag);
+
+	for (i = 0; i < count; i++) {
+		gchar *str;
+
+		if (gst_tag_get_type(tag) == G_TYPE_STRING) {
+			if (!gst_tag_list_get_string_index(list, tag, i, &str))
+				g_assert_not_reached();
+		} else {
+			str = g_strdup_value_contents(
+					gst_tag_list_get_value_index(list, tag, i));
+		}
+
+		if (i == 0) {
+			g_print("  %15s: %s\n", gst_tag_get_nick(tag), str);
+		} else {
+			g_print("                 : %s\n", str);
+		}
+
+		g_free(str);
+	}
+}
+
+/* Extract some metadata from the streams */
+static void analyze_streams(GstBus *bus, GstMessage *msg, CustomData *data) {
+	gint i;
+	GstTagList *tags;
+	gchar *str;
+	guint rate; /* Read some properties */
+	g_object_get(data->pipeline, "n-video", &data->n_video, NULL);
+	g_object_get(data->pipeline, "n-audio", &data->n_audio, NULL);
+	g_object_get(data->pipeline, "n-text", &data->n_text, NULL);
+	g_print("%d video stream(s), %d audio stream(s), %d text stream(s)\n",
+			data->n_video, data->n_audio, data->n_text);
+
+	for (i = 0; i < data->n_video; i++) {
+		tags = NULL; /* Retrieve the stream's video tags */
+		g_signal_emit_by_name(data->pipeline, "get-video-tags", i, &tags);
+		if (tags) {
+
+			g_print("video stream %d:\n", i);
+
+			gst_tag_list_foreach(tags, print_tag, NULL);
+			gst_tag_list_free(tags);
+		}
+	}
+
+	for (i = 0; i < data->n_audio; i++) {
+		tags = NULL; /* Retrieve the stream's audio tags */
+		g_signal_emit_by_name(data->pipeline, "get-audio-tags", i, &tags);
+		if (tags) {
+
+			g_print("audio stream %d:\n", i);
+
+			gst_tag_list_foreach(tags, print_tag, NULL);
+			gst_tag_list_free(tags);
+
+		}
+	}
+
+	for (i = 0; i < data->n_text; i++) {
+		tags = NULL; /* Retrieve the stream's subtitle tags */
+		g_print("subtitle stream %d:\n", i);
+		g_signal_emit_by_name(data->pipeline, "get-text-tags", i, &tags);
+		if (tags) {
+
+			gst_tag_list_foreach(tags, print_tag, NULL);
+			gst_tag_list_free(tags);
+
+		} else {
+			g_print("  no tags found\n");
+		}
+	}
+	g_object_get(data->pipeline, "current-video", &data->current_video, NULL);
+	g_object_get(data->pipeline, "current-audio", &data->current_audio, NULL);
+	g_object_get(data->pipeline, "current-text", &data->current_text, NULL);
+
+	g_print(
+			"Currently playing video stream %d, audio stream %d and subtitle stream %d\n",
+			data->current_video, data->current_audio, data->current_text);
+
+}
+
 static gboolean push_data(CustomData *data) {
 
 	g_print("gsutil:push_data enter");
@@ -305,23 +407,16 @@ static gboolean push_data(CustomData *data) {
 	}
 
 	//buffer = gst_buffer_new();
-     buffer = gst_buffer_new_wrapped_full(GST_MEMORY_FLAG_READONLY, head_maped+out_index,
-    		 nRead, 0, nRead,NULL, NULL);
-	//replace with gst_buffer_insert_memory when gstreamer 1.x
+	//replace with gst_buffer_new_wrapped_full when gstreamer 1.x
+	buffer = gst_buffer_new_wrapped_full(GST_MEMORY_FLAG_READONLY,
+			head_maped + out_index, nRead, 0, nRead, NULL, NULL);
+
 #if 0
 	GST_BUFFER_DATA (buffer) = head_maped + out_index;
 	GST_BUFFER_SIZE (buffer) = nRead;
 #endif
 
-	//refer tests/check/gst/Gstbuffer.c create_read_only_buffer
-	/* assign some read-only data to the new buffer */
-	/*
-	gst_buffer_insert_memory(buffer, -1,
-			gst_memory_new_wrapped(GST_MEMORY_FLAG_READONLY,
-					(gpointer) (head_maped), nRead, out_index,
-					nRead, NULL, NULL));
-	 */
-	g_print("gst_buffer_get_size %d", gst_buffer_get_size(buffer));
+	GST_DEBUG("gst_buffer_get_size %d", gst_buffer_get_size(buffer));
 
 	out_index += nRead; //CHUNK_SIZE
 
@@ -333,9 +428,10 @@ static gboolean push_data(CustomData *data) {
 
 	/* Push the buffer into the appsrc */
 	g_signal_emit_by_name(data->app_source, "push-buffer", buffer, &ret);
-	//ret = gst_app_src_push_buffer(data->app_source, buffer);
+
 	/* Free the buffer now that we are done with it */
 	gst_buffer_unref(buffer);
+
 	if (ret != GST_FLOW_OK) {
 		/* We got some error, stop sending data */
 		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
@@ -566,7 +662,8 @@ static void check_initialization_complete(CustomData *data) {
 		if (1 == iMediaType && data->native_window) {
 			g_print("set draw window for pipeline");
 			/* The main loop is running and we received a native window, inform the sink about it */
-			gst_video_overlay_set_window_handle(GST_VIDEO_OVERLAY(data->pipeline),
+			gst_video_overlay_set_window_handle(
+					GST_VIDEO_OVERLAY(data->pipeline),
 					(guintptr) data->native_window);
 
 		}
@@ -685,7 +782,7 @@ static void *app_function(void *userdata) {
 	/* Disable subtitles */
 	g_object_get(data->pipeline, "flags", &flags, NULL);
 	flags |= GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_AUDIO
-		     | GST_PLAY_FLAG_BUFFERING;
+			| GST_PLAY_FLAG_BUFFERING;
 	//| GST_PLAY_FLAG_DOWNLOAD;
 	flags &= ~GST_PLAY_FLAG_TEXT;
 	g_object_set(data->pipeline, "flags", flags, NULL);
@@ -704,7 +801,6 @@ static void *app_function(void *userdata) {
 	gst_element_set_state(data->pipeline, GST_STATE_READY);
 
 	g_object_set(data->pipeline, "uri", "appsrc://", NULL);
-
 
 	/* Instruct the bus to emit signals for each received message, and connect to the interesting signals */
 	bus = gst_element_get_bus(data->pipeline);
@@ -725,6 +821,10 @@ static void *app_function(void *userdata) {
 			(GCallback) buffering_cb, data);
 	g_signal_connect(G_OBJECT(bus), "message::clock-lost",
 			(GCallback) clock_lost_cb, data);
+
+	g_signal_connect(G_OBJECT(bus), "message::tag", (GCallback) analyze_streams,
+			data);
+
 	gst_object_unref(bus);
 
 	/* Create a GLib Main Loop and set it to run */
@@ -772,18 +872,7 @@ static void *app_function(void *userdata) {
 	return NULL;
 }
 
-/**
- *init_shmfile
- *return true: create file succ, and get  head_mapped
- */
-static gboolean init_shmfile(JNIEnv* env) {
-
-	if (0UL == recv_len) {
-		__android_log_print(ANDROID_LOG_ERROR, TAGSTR, "recv_len: %lu, ",
-				recv_len);
-		return FALSE;
-	}
-
+static void getExtPath(JNIEnv* env) {
 	jclass cls_Env = (*env)->FindClass(env, "android/os/Environment");
 	jmethodID mid_getExtStorage = (*env)->GetStaticMethodID(env, cls_Env,
 			"getExternalStorageDirectory", "()Ljava/io/File;");
@@ -796,10 +885,24 @@ static gboolean init_shmfile(JNIEnv* env) {
 	jstring obj_Path = (*env)->CallObjectMethod(env, obj_File, mid_getPath);
 	const char* path = (*env)->GetStringUTFChars(env, obj_Path, 0);
 
-	snprintf(SHM_FILE, PATH_MAX, "%s/media_shm", path);
+	snprintf(SDCARD_PREFIX, PATH_MAX, "%s", path);
 
 	(*env)->ReleaseStringUTFChars(env, obj_Path, path);
+}
+/**
+ *init_shmfile
+ *return true: create file succ, and get  head_mapped
+ */
+static gboolean init_shmfile(JNIEnv* env) {
 
+	if (0UL == recv_len) {
+		__android_log_print(ANDROID_LOG_ERROR, TAGSTR, "recv_len: %lu, ",
+				recv_len);
+		return FALSE;
+	}
+
+	getExtPath(env);
+	snprintf(SHM_FILE, PATH_MAX, "%s/media_shm", SDCARD_PREFIX);
 	g_print("SHM_FILE path:%s", SHM_FILE);
 
 	int fd = -1;
@@ -1127,6 +1230,180 @@ static jboolean gst_native_setrecvlen(JNIEnv* env, jobject thiz, jlong jlen) {
 
 }
 
+/**
+ *copy from gstreamer baseplugin tests/examples/snapshot
+ *for local videofile
+ */
+static void gst_native_snapshot(JNIEnv* env, jobject thiz, jstring filePath,
+		jint width) {
+	GstElement *pipeline = NULL, *sink = NULL;
+	gint width, height;
+	GstSample *sample = NULL;
+	gchar *descr = NULL;
+	GError *error = NULL;
+	GdkPixbuf *pixbuf = NULL;
+	gint64 duration, position;
+	GstStateChangeReturn ret;
+	gboolean res;
+	GstMapInfo map;
+
+	CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
+	if (!data)
+		return;
+
+	char * ptrVideoFile = NULL;
+	ptrVideoFile = (char*) (*env)->GetStringUTFChars(env, filePath, NULL);
+	g_print("snapshot: %s", ptrVideoFile);
+	char * pch = NULL;
+	pch = strrchr(ptrVideoFile, '/');
+	if (!pch) {
+		goto SNAP_ERROR;
+	}
+	pch++;
+	if (!pch) {
+		goto SNAP_ERROR;
+	}
+
+	char fileName[128] = {0};
+	strncpy(fileName, pch, strlen(pch)+1);
+	fileName[127] = 0; //prevent pch too long
+
+	/* create a new pipeline */
+	descr = g_strdup_printf(
+			"uridecodebin uri=file://%s ! videoconvert ! videoscale ! "
+					" appsink name=sink caps=\"" SNAP_CAPS "\"", ptrVideoFile,
+			width);
+
+	g_print("%s", descr);
+	set_ui_message(descr, data);
+	pipeline = gst_parse_launch(descr, &error);
+
+	if (error != NULL) {
+		g_print("could not construct pipeline: %s\n", error->message);
+		g_error_free(error);
+		set_ui_message(error->message, data);
+		goto SNAP_ERROR;
+	}
+
+	/* get sink */
+	sink = gst_bin_get_by_name(GST_BIN(pipeline), "sink");
+
+	/* set to PAUSED to make the first frame arrive in the sink */
+	ret = gst_element_set_state(pipeline, GST_STATE_PAUSED);
+	switch (ret) {
+	case GST_STATE_CHANGE_FAILURE:
+		g_print("failed to play the file\n");
+		set_ui_message("failed to play the file1", data);
+		goto SNAP_ERROR;
+	case GST_STATE_CHANGE_NO_PREROLL:
+		/* for live sources, we need to set the pipeline to PLAYING before we can
+		 * receive a buffer. We don't do that yet */
+		g_print("live sources not supported yet\n");
+		set_ui_message("live sources not supported yet", data);
+		goto SNAP_ERROR;
+	default:
+		break;
+	}
+	/* This can block for up to 5 seconds. If your machine is really overloaded,
+	 * it might time out before the pipeline prerolled and we generate an error. A
+	 * better way is to run a mainloop and catch errors there. */
+
+	ret = gst_element_get_state(pipeline, NULL, NULL, 5 * GST_SECOND);
+	if (ret == GST_STATE_CHANGE_FAILURE) {
+		g_print("failed to play the file2\n");
+		set_ui_message("failed to play the file2", data);
+		goto SNAP_ERROR;
+	}
+
+	/* get the duration */
+	gst_element_query_duration(pipeline, GST_FORMAT_TIME, &duration);
+
+	if (duration != -1)
+		/* we have a duration, seek to 50% */
+		position = duration * 50 / 100;
+	else
+		/* no duration, seek to 1 second, this could EOS */
+		position = 1 * GST_SECOND;
+
+	//set_ui_message("gst_element_query_duration", data);
+
+	/* seek to the a position in the file. Most files have a black first frame so
+	 * by seeking to somewhere else we have a bigger chance of getting something
+	 * more interesting. An optimisation would be to detect black images and then
+	 * seek a little more */
+	gst_element_seek_simple(pipeline, GST_FORMAT_TIME,
+			GST_SEEK_FLAG_KEY_UNIT | GST_SEEK_FLAG_FLUSH, position);
+
+	//set_ui_message("gst_element_seek_simple", data);
+
+	/* get the preroll buffer from appsink, this block untils appsink really
+	 * prerolls */
+	g_signal_emit_by_name(sink, "pull-preroll", &sample, NULL);
+
+	/* if we have a buffer now, convert it to a pixbuf. It's possible that we
+	 * don't have a buffer because we went EOS right away or had an error. */
+	if (sample) {
+		GstBuffer *buffer;
+		GstCaps *caps;
+		GstStructure *s;
+
+		/* get the snapshot buffer format now. We set the caps on the appsink so
+		 * that it can only be an rgb buffer. The only thing we have not specified
+		 * on the caps is the height, which is dependant on the pixel-aspect-ratio
+		 * of the source material */
+		caps = gst_sample_get_caps(sample);
+		if (!caps) {
+			g_print("could not get snapshot format\n");
+			set_ui_message("could not get snapshot format", data);
+			goto SNAP_ERROR;
+		}
+		s = gst_caps_get_structure(caps, 0);
+
+		/* we need to get the final caps on the buffer to get the size */
+		res = gst_structure_get_int(s, "width", &width);
+		res |= gst_structure_get_int(s, "height", &height);
+		if (!res) {
+			g_print("could not get snapshot dimension\n");
+			set_ui_message("could not get snapshot dimension", data);
+			goto SNAP_ERROR;
+		}
+
+		/* create pixmap from buffer and save, gstreamer video buffers have a stride
+		 * that is rounded up to the nearest multiple of 4 */
+		buffer = gst_sample_get_buffer(sample);
+		gst_buffer_map(buffer, &map, GST_MAP_READ);
+		pixbuf = gdk_pixbuf_new_from_data(map.data, GDK_COLORSPACE_RGB, FALSE,
+				8, width, height, GST_ROUND_UP_4(width * 3), NULL, NULL);
+
+		getExtPath(env);
+		//todo
+		char savePath[PATH_MAX] = { 0 };
+		snprintf(savePath, PATH_MAX, "%s/%s.png", SDCARD_PREFIX, fileName);
+		savePath[PATH_MAX-1] = 0;
+
+		/* save the pixbuf */
+		gdk_pixbuf_save(pixbuf, savePath, "png",
+				&error, NULL);
+		gst_buffer_unmap(buffer, &map);
+	} else {
+		g_print("could not make snapshot\n");
+		set_ui_message("sample is null, could not make snapshot", data);
+	}
+
+	SNAP_ERROR:
+	/* cleanup and exit */
+	if (NULL != ptrVideoFile)
+		(*env)->ReleaseStringUTFChars(env, filePath, ptrVideoFile);
+
+	if (NULL != descr)
+		g_free(descr);
+
+	if (NULL != pipeline) {
+		gst_element_set_state(pipeline, GST_STATE_NULL);
+		gst_object_unref(pipeline);
+	}
+}
+
 /* Static class initializer: retrieve method and field IDs */
 static jboolean gst_native_class_init(JNIEnv* env, jclass klass) {
 	custom_data_field_id = (*env)->GetFieldID(env, klass, "native_custom_data",
@@ -1214,9 +1491,10 @@ static void gst_native_surface_finalize(JNIEnv *env, jobject thiz) {
 static JNINativeMethod native_methods[] = { { "nativeInit", "()V",
 		(void *) gst_native_init }, { "nativeFinalize", "()V",
 		(void *) gst_native_finalize }, { "nativePlay", "()V",
-		(void *) gst_native_play }, { "nativePause", "()V",
-		(void *) gst_native_pause }, { "nativeInputData", "([B)V",
-		(void *) gst_native_inputdata }, { "nativeSetRecvLen", "(J)Z",
+		(void *) gst_native_play }, { "nativeSnapshot",
+		"(Ljava/lang/String;I)V", (void *) gst_native_snapshot }, {
+		"nativePause", "()V", (void *) gst_native_pause }, { "nativeInputData",
+		"([B)V", (void *) gst_native_inputdata }, { "nativeSetRecvLen", "(J)Z",
 		(void *) gst_native_setrecvlen }, { "nativeSetChunkSize", "(I)V",
 		(void *) gst_native_set_chunksize }, { "nativeSetMediaType", "(I)V",
 		(void *) gst_native_set_mediatype }, { "nativeSetBuffScale", "(I)V",
