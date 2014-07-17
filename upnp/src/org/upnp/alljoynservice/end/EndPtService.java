@@ -35,7 +35,11 @@ public class EndPtService extends Service implements ServiceConfig
 {
 
 	private static final String TAG = "EndPtService";
-
+	
+	public final static String  SERVICE_NAME_KEY = "EndServiceName";
+	public final static String  SERVICE_PORT_KEY = "EndServicePort";
+	public final static String  SERVICE_OBJPATH_KEY = "BusObjPath";
+	
 	private static final int CONNECT = 0;
 	private static final int DISCONNECT = 1;
 	private static final int JOIN_SESSION = 2;

@@ -27,6 +27,7 @@ public class GstUtilNative
 	private native void 	nativeSetMediaType(int mediatype);
     private native void nativeSurfaceInit(Object surface); // A new surface is available
     private native void nativeSurfaceFinalize(); // Surface about to be destroyed
+    private native void nativeSnapshot(String filePath, int width);
     
 	private static native boolean nativeClassInit(); // Initialize native class:
 														// cache Method IDs for
@@ -116,6 +117,16 @@ public class GstUtilNative
 	public void setGstMsgListener(GstMsgListener observer)
 	{
 		mGstMsgObserver = observer;
+	}
+	
+	/**
+	 * 
+	 * @param filePath
+	 * @param width
+	 */
+	public void gstVideoSnapShot(final String filePath, int width)
+	{
+		nativeSnapshot(filePath, width);
 	}
 	
 	/**
