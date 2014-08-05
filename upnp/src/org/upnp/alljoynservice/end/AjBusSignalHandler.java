@@ -32,6 +32,23 @@ public class AjBusSignalHandler
 			}
 			mRecvStatus = true;
 			mRecvStr = str;
+			
+			// getInfoFromSignal is deprecated now!
+            if (null == mIBusDataListener)
+            {
+                Log.e(TAG, "mIBusDataListener is null, data lost");
+                mRecvStatus = false;
+                return;
+            }
+            
+            //RecvBusData is a key point, if it slow,
+            boolean bRet = mIBusDataListener.RecvBusData(str);
+            if (!bRet)
+            {
+                Log.e(TAG, "mIBusDataListener.RecvBusData fail!");
+            }
+            
+            mRecvStatus = false;			
 		}
 	}
 
@@ -72,6 +89,7 @@ public class AjBusSignalHandler
 		return mRecvStatus;
 	}
 
+	@Deprecated
 	public String getInfoFromSignal()
 	{
 		Log.i(TAG, "getInfoFromSignal");

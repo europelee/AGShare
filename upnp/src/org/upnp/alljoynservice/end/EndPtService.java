@@ -16,6 +16,7 @@ import org.alljoyn.bus.SessionPortListener;
 import org.alljoyn.bus.SignalEmitter;
 import org.alljoyn.bus.Status;
 
+import org.upnp.alljoynservice.ConstData.AlljoynConst;
 import org.upnp.alljoynservice.Device.DeviceInterface;
 import org.upnp.alljoynservice.Device.DeviceService;
 
@@ -38,6 +39,7 @@ public class EndPtService extends Service implements ServiceConfig {
   public final static String SERVICE_NAME_KEY = "EndServiceName";
   public final static String SERVICE_PORT_KEY = "EndServicePort";
   public final static String SERVICE_OBJPATH_KEY = "BusObjPath";
+  public final static String CIRCLE_NAME_KEY = "CircleName";
 
   private static final int CONNECT = 0;
   private static final int DISCONNECT = 1;
@@ -75,7 +77,16 @@ public class EndPtService extends Service implements ServiceConfig {
   private ProxyBusObject mProxyObj = null;
 
   private DeviceInterface mSignalInterface = null; // for service
-  public AjBusSignalHandler mSigHandler = null; // for client
+  public AjBusSignalHandler mSigHandler = new AjBusSignalHandler();// null; // for client
+
+  private String mCircleName = "weshare_circlce";
+  private ISessionStatusListener mSessionStatusListener = null;
+
+  private IAlljoynMsgListener mAlljoynMsgListener = null;
+  private IServiceFoundListener mServiceFoundListener = null;
+  private IJoinListener mJoinListener = null;
+
+  private boolean mIsBound = false;
 
   /**
    * mDataBuffer refer buffermem provided by app layer then EndPtService pass it to mSigHandler
@@ -89,6 +100,9 @@ public class EndPtService extends Service implements ServiceConfig {
   // when session use multipoint, some different joinernames would correspond
   // to same sessionid
   HashMap<Long, ArrayList<String>> mClientList = new HashMap<Long, ArrayList<String>>();
+
+  // used in joinsession
+  private ArrayList<ServiceFound> mServiceFoundList = new ArrayList<ServiceFound>();
 
 
   /**
@@ -360,16 +374,22 @@ public class EndPtService extends Service implements ServiceConfig {
   }
 
   private class AlljoynBusListener extends BusListener {
+
     public void foundAdvertisedName(String name, short transport, String namePrefix) {
       Log.i(TAG, String.format("MyBusListener.foundAdvertisedName(%s, 0x%04x, %s)", name,
           transport, namePrefix));
 
-      if (!mIsjoinSession) {
-        Message msg = mBackgroundHandler.obtainMessage(JOIN_SESSION);
-        msg.arg1 = transport;
-        msg.obj = name;
-        mBackgroundHandler.sendMessage(msg);
+      mServiceFoundList.add(new ServiceFound(name, transport));
+
+      if (null != mServiceFoundListener) {
+        mServiceFoundListener.addServiceFound(new ServiceFound(name, transport));
       }
+      // if (!mIsjoinSession) {
+      // Message msg = mBackgroundHandler.obtainMessage(JOIN_SESSION);
+      // msg.arg1 = transport;
+      // msg.obj = name;
+      // mBackgroundHandler.sendMessage(msg);
+      // }
 
     }
 
@@ -379,6 +399,22 @@ public class EndPtService extends Service implements ServiceConfig {
       Log.i(TAG, "because of session-based, so ignore the above lost-info msg");
       // because session-based, so dont need set mIsjoinSession = false
       // mIsjoinSession = false;
+      int lSize = mServiceFoundList.size();
+      int i = 0;
+      for (i = 0; i < lSize; ++i) {
+        ServiceFound tmp = mServiceFoundList.get(i);
+        if (tmp.mServiceNameFound.equals(name) && tmp.mServicePortFound == transport) {
+          Log.i(TAG, name + ":" + transport + " removed");
+          break;
+        }
+      }
+
+      if (i >= 0 && i < lSize) {
+        mServiceFoundList.remove(i);
+        if (null != mServiceFoundListener) {
+          mServiceFoundListener.removeServiceFound(new ServiceFound(name, transport));
+        }
+      }
 
     }
 
@@ -424,12 +460,18 @@ public class EndPtService extends Service implements ServiceConfig {
     public void sessionMemberAdded(int sessionId, String uniqueName) {
       Log.i(TAG, "add:" + "sessid:" + sessionId + " uniquename:" + uniqueName);
       putAdd((long) sessionId, uniqueName);
+      if (null != mJoinListener) {
+        mJoinListener.addJoiner((long) sessionId, uniqueName);
+      }
     }
 
     @Override
     public void sessionMemberRemoved(int sessionId, String uniqueName) {
       Log.i(TAG, "remove:" + "sessid:" + sessionId + " uniquename:" + uniqueName);
       delElem((long) sessionId, uniqueName);
+      if (null != mJoinListener) {
+        mJoinListener.delJoiner((long) sessionId, uniqueName);
+      }
     }
   };
 
@@ -499,6 +541,14 @@ public class EndPtService extends Service implements ServiceConfig {
     }
   }
 
+  @Override
+  public boolean onUnbind(Intent intent) {
+    System.out.println("------onUnbind");
+    mIsBound = false;
+    return super.onUnbind(intent);
+  }
+
+  @Override
   public IBinder onBind(Intent intent) {
 
     Log.i(TAG, "onBind");
@@ -515,6 +565,7 @@ public class EndPtService extends Service implements ServiceConfig {
       Log.i(TAG, "ROLE IS " + sRole + ".." + mRole.toString());
     else {
       Log.e(TAG, "ROLE IS " + sRole + " error: mRole is null");
+      return null;
     }
 
     Object obj = null;
@@ -529,15 +580,20 @@ public class EndPtService extends Service implements ServiceConfig {
       this.mServicePort =
           (short) Integer.parseInt(bunde.get(EndPtService.SERVICE_PORT_KEY).toString());
     }
-   
+
     obj = bunde.get(EndPtService.SERVICE_OBJPATH_KEY);
-    if (null != obj)
-    {
+    if (null != obj) {
       this.mBusObjPath = obj.toString();
     }
 
-    mBackgroundHandler.sendEmptyMessage(CONNECT);
+    obj = bunde.get(EndPtService.CIRCLE_NAME_KEY);
+    if (null != obj) {
+      this.mCircleName = obj.toString();
+    }
 
+    // mBackgroundHandler.sendEmptyMessage(CONNECT);
+
+    mIsBound = true;
 
     return binder;
   }
@@ -599,16 +655,25 @@ public class EndPtService extends Service implements ServiceConfig {
 
     if (mIsConnected) {
       Log.i(TAG, "already connected!");
+
+      if (null != mAlljoynMsgListener) {
+        mAlljoynMsgListener.onSucc("already connected!", AlljoynConst.MSG_SUCC_DEFAULT_CODE);
+      }
+
       return;
     }
+
+    // 1. Create message bus
     if (mBus == null) {
       org.alljoyn.bus.alljoyn.DaemonInit.PrepareDaemon(getApplicationContext());
       mBus = new BusAttachment(getPackageName(), BusAttachment.RemoteMessage.Receive);
       mBus.setLogLevels("ALL=1;ALLJOYN=7");
     }
 
+    // 2. register buslistener
     mBus.registerBusListener(mBusListener);
 
+    // 3. Create and register the bus object that will be used to send and receive signals
     if (ServiceRole.SERVER_END == mRole || ServiceRole.CLIENT_END == mRole) {
 
       if (null == mDev) mDev = new DeviceService();
@@ -617,17 +682,30 @@ public class EndPtService extends Service implements ServiceConfig {
       logStatus("BusAttachment.registerBusObject(mBusObjPath)", status);
       if (status != Status.OK) {
         Log.e(TAG, "registerBusObject fail!");
+
+        if (null != mAlljoynMsgListener) {
+          mAlljoynMsgListener.onFail(new AlljoynErr(AlljoynConst.MSG_ERR_REGISTER_BUSLISTENER_FAIL,
+              "registerBusObject fail"));
+        }
+
         mBus.unregisterBusListener(mBusListener);
+
         return;
       }
     }
 
+    // 4.Connect to the local daemon
     status = mBus.connect();
     logStatus("BusAttachment.connect()", status);
     if (status != Status.OK) {
       Log.e(TAG, "BusAttachment.connect() fail!");
 
-      if (ServiceRole.SERVER_END == mRole)// ugly
+      if (null != mAlljoynMsgListener) {
+        mAlljoynMsgListener.onFail(new AlljoynErr(AlljoynConst.MSG_ERR_BUS_CONNECT_FAIL,
+            "BusAttachment.connect fail"));
+      }
+
+      if (ServiceRole.SERVER_END == mRole || ServiceRole.CLIENT_END == mRole)// ugly
       {
         mBus.unregisterBusObject(mDev);
       }
@@ -638,8 +716,8 @@ public class EndPtService extends Service implements ServiceConfig {
 
     mIsConnected = true;
 
-    // signalhandler
-    if (ServiceRole.CLIENT_END == mRole) {
+    // 3.2 signalhandler that will be used to receive signals
+    if (ServiceRole.CLIENT_END == mRole || ServiceRole.SERVER_END == mRole) {
       if (null == mSigHandler) {
         mSigHandler = new AjBusSignalHandler();
       }
@@ -655,6 +733,11 @@ public class EndPtService extends Service implements ServiceConfig {
       logStatus("BusAttachement.findAdvertisedName " + mServiceName, status);
       if (Status.OK != status) {
 
+        if (null != mAlljoynMsgListener) {
+          mAlljoynMsgListener.onFail(new AlljoynErr(AlljoynConst.MSG_ERR_ASYNC_FIND_ADVERNAME_FAIL,
+              "BusAttachement.findAdvertisedName  fail"));
+        }
+
         // unregister
         unregisterSignalHandlers();
 
@@ -665,6 +748,11 @@ public class EndPtService extends Service implements ServiceConfig {
 
         mIsConnected = false;
         return;
+      }
+
+
+      if (null != mAlljoynMsgListener) {
+        mAlljoynMsgListener.onSucc("do connect succ!", AlljoynConst.MSG_SUCC_CONN_CODE);
       }
 
       return; // below: service_end
@@ -716,17 +804,29 @@ public class EndPtService extends Service implements ServiceConfig {
         // sessionid by default
         if (null == mSignalInterface) {
           // future, custom joiner?
+          // use SignalEmitter(BusObject source, String destination, int sessionId,
+          // SignalEmitter.GlobalBroadcast globalBroadcast)
+          // for a special dest
           SignalEmitter emitter =
               new SignalEmitter(mDev, mSessionId, SignalEmitter.GlobalBroadcast.Off);
           mSignalInterface = emitter.getInterface(DeviceInterface.class);
         }
         //
         putAdd((long) mSessionId, joiner);
-
+        if (null != mJoinListener) {
+          mJoinListener.addJoiner((long) sessionId, joiner);
+        }
         // for monitoring cli
         Status val = mBus.setSessionListener(mSessionId, new AlljoynSessionListener());
         if (val != Status.OK) {
           Log.i(TAG, "set sessionlistener for joiner(" + joiner + ") fail!");
+
+          if (null != mAlljoynMsgListener) {
+            mAlljoynMsgListener.onFail(new AlljoynErr(
+                AlljoynConst.MSG_ERR_SET_SESSIONLISTENER_4CLI_FAIL,
+                "setSessionListener for monitoring cli  fail"));
+          }
+
         }
 
         mIsAccept = true;
@@ -740,6 +840,13 @@ public class EndPtService extends Service implements ServiceConfig {
     if (status != Status.OK) {
 
       Log.e(TAG, "BusAttachment.bindSessionPort fail!");
+
+      if (null != mAlljoynMsgListener) {
+        mAlljoynMsgListener.onFail(new AlljoynErr(AlljoynConst.MSG_ERR_BIND_SESSIONPORT_FAIL,
+            "BusAttachment.bindSessionPort fail"));
+      }
+
+      unregisterSignalHandlers();
       mBus.unregisterBusObject(mDev);
       mBus.unregisterBusListener(mBusListener);
       mBus.disconnect();
@@ -750,7 +857,8 @@ public class EndPtService extends Service implements ServiceConfig {
         BusAttachment.ALLJOYN_REQUESTNAME_FLAG_REPLACE_EXISTING
             | BusAttachment.ALLJOYN_REQUESTNAME_FLAG_DO_NOT_QUEUE;
 
-    mSerGUIDName = mServiceName + mBus.getGlobalGUIDString();
+    // mSerGUIDName = mServiceName + "." + mBus.getGlobalGUIDString() + "." + mCircleName;
+    mSerGUIDName = mServiceName + "." + mCircleName;
 
     status = mBus.requestName(mSerGUIDName, flag);
     logStatus(String.format("BusAttachment.requestName(%s, 0x%08x)", mSerGUIDName, flag), status);
@@ -758,9 +866,16 @@ public class EndPtService extends Service implements ServiceConfig {
       status = mBus.advertiseName(mSerGUIDName, SessionOpts.TRANSPORT_ANY);
       logStatus("BusAttachement.advertiseName " + mSerGUIDName, status);
       if (status != Status.OK) {
+
+        if (null != mAlljoynMsgListener) {
+          mAlljoynMsgListener.onFail(new AlljoynErr(AlljoynConst.MSG_ERR_ADVERTISENAME_FAIL,
+              "BusAttachement.advertiseName fail"));
+        }
+
         status = mBus.releaseName(mSerGUIDName);
         logStatus(String.format("BusAttachment.releaseName(%s)", mSerGUIDName), status);
         mBus.unbindSessionPort(mServicePort);
+        unregisterSignalHandlers();
         mBus.unregisterBusObject(mDev);
         mBus.unregisterBusListener(mBusListener);
         mBus.disconnect();
@@ -768,32 +883,51 @@ public class EndPtService extends Service implements ServiceConfig {
       }
     } else {
       Log.e(TAG, "mBus.requestName fail");
+
+      if (null != mAlljoynMsgListener) {
+        mAlljoynMsgListener.onFail(new AlljoynErr(AlljoynConst.MSG_ERR_REQ_NAME_FAIL,
+            "mBus.requestName fail"));
+      }
+
       mBus.unbindSessionPort(mServicePort);
+      unregisterSignalHandlers();
       mBus.unregisterBusObject(mDev);
       mBus.unregisterBusListener(mBusListener);
       mBus.disconnect();
       return;
     }
 
+    if (null != mAlljoynMsgListener) {
+      mAlljoynMsgListener.onSucc("doConnect succ", AlljoynConst.MSG_SUCC_AD_SERVICE_CODE);
+    }
+
   }
 
   private void doDisconnect() {
-    if (!mIsConnected) return;
+    if (!mIsConnected) {
+
+      if (null != mAlljoynMsgListener) {
+        mAlljoynMsgListener
+            .onSucc("doDisconnect succ!", AlljoynConst.MSG_SUCC_ALLJOYN_SERVICE_EXIT);
+      }
+      return;
+    }
 
     if (ServiceRole.SERVER_END == mRole) {
       mBus.cancelAdvertiseName(mSerGUIDName, SessionOpts.TRANSPORT_ANY);
       mBus.releaseName(mSerGUIDName);
       mBus.unbindSessionPort(mServicePort);
 
-      mSignalInterface = null;
     }
+
+    mSignalInterface = null;
 
     mBus.unregisterBusListener(mBusListener);
 
     if (ServiceRole.SERVER_END == mRole || ServiceRole.CLIENT_END == mRole) // ugly
       mBus.unregisterBusObject(mDev);
 
-    if (ServiceRole.CLIENT_END == mRole) {
+    if (ServiceRole.CLIENT_END == mRole || ServiceRole.SERVER_END == mRole) {
       unregisterSignalHandlers();
     }
 
@@ -809,13 +943,25 @@ public class EndPtService extends Service implements ServiceConfig {
     // mBackgroundHandler.getLooper().quit(); //called in func onDestroy!
     mBus.release();
 
+
     mIsConnected = false;
 
     synchronized (EndPtService.this) {
       mClientList.clear();
     }
+
+
+
     boolean isStop = this.busThread.quit();
     if (false == isStop) Log.i(TAG, "busthread stop fail!!!");
+
+    this.busThread = null;
+
+
+    if (null != mAlljoynMsgListener) {
+      mAlljoynMsgListener.onSucc("doDisconnect succ!", AlljoynConst.MSG_SUCC_ALLJOYN_SERVICE_EXIT);
+    }
+
   }
 
   private boolean doJoinSession(String name) {
@@ -834,10 +980,20 @@ public class EndPtService extends Service implements ServiceConfig {
 
           logStatus(String.format("MyBusListener.sessionLost(sessionId = %d, reason = %d)",
               sessionId, reason), Status.OK);
+
+          if (null != mSessionStatusListener) {
+            mSessionStatusListener.getSessionStatus(mIsjoinSession);
+          }
         }
       });
     } catch (Exception ex) {
       Log.e(TAG, "doJoinSession joinSession error");
+
+      if (null != mAlljoynMsgListener) {
+        mAlljoynMsgListener.onFail(new AlljoynErr(AlljoynConst.MSG_ERR_JOIN_SESSION_FAIL,
+            "doJoinSession joinSession error"));
+      }
+
       return false;
     }
 
@@ -845,11 +1001,20 @@ public class EndPtService extends Service implements ServiceConfig {
         status);
 
     if (Status.OK != status && Status.ALLJOYN_JOINSESSION_REPLY_ALREADY_JOINED != status) {
+
+      if (null != mAlljoynMsgListener) {
+        mAlljoynMsgListener.onFail(new AlljoynErr(AlljoynConst.MSG_ERR_JOIN_SESSION_FAIL,
+            "doJoinSession joinSession error2"));
+      }
+
       return false;
     }
 
     if (Status.ALLJOYN_JOINSESSION_REPLY_ALREADY_JOINED == status) {
       mIsjoinSession = true;
+      if (null != mSessionStatusListener) {
+        mSessionStatusListener.getSessionStatus(mIsjoinSession);
+      }
       return true;
     }
     // mServiceName a prefix name, while name : mServiceName+guid
@@ -861,15 +1026,39 @@ public class EndPtService extends Service implements ServiceConfig {
     mDevI = mProxyObj.getInterface(DeviceInterface.class);
 
     mSessionId = sessionId.value;
+    if (null == mSignalInterface) {
+
+      // use SignalEmitter(BusObject source, String destination, int sessionId,
+      // SignalEmitter.GlobalBroadcast globalBroadcast)
+      // for a special dest
+      SignalEmitter emitter =
+          new SignalEmitter(mDev, mSessionId, SignalEmitter.GlobalBroadcast.Off);
+      mSignalInterface = emitter.getInterface(DeviceInterface.class);
+    }
+
     mIsjoinSession = true;
+
+    if (null != mSessionStatusListener) {
+      mSessionStatusListener.getSessionStatus(mIsjoinSession);
+    }
 
     if (mDevI == null) {
       Log.e(TAG, "doJoinSession mDevI==null");
+
+      if (null != mAlljoynMsgListener) {
+        mAlljoynMsgListener.onFail(new AlljoynErr(AlljoynConst.MSG_ERR_GET_BUSINTERFACE_FAIL,
+            "doJoinSession mDevI==null"));
+      }
 
     } else {
       Log.i(TAG, "doJoinSession mDevI ok");
 
     }
+
+    if (null != mAlljoynMsgListener) {
+      mAlljoynMsgListener.onSucc("doJoinSession succ!", AlljoynConst.MSG_SUCC_DEFAULT_CODE);
+    }
+
 
     return true;
   }
@@ -888,5 +1077,122 @@ public class EndPtService extends Service implements ServiceConfig {
     } else {
       Log.i(TAG, "setBusDataListener fail: mSigHandler null");
     }
+  }
+
+  /**
+   * 
+   * start(take into the function from onbind, for easily control) void
+   * 
+   * @exception
+   * @since 1.0.0
+   */
+  public void start() {
+    /*
+     * System.out.println("Handler--->" + Thread.currentThread().getName()+" "
+     * +Thread.currentThread().getId()); int nLoop = 4; while(true) { if (null == busThread || false
+     * == this.busThread.isAlive()) { nLoop--;
+     * 
+     * if (nLoop < 0) { Log.e(TAG, "busthread not alive"); return; }
+     * 
+     * try { Thread.sleep(1000); } catch (InterruptedException e) { // TODO Auto-generated catch
+     * block e.printStackTrace(); }
+     * 
+     * } else break; }
+     * 
+     * Log.i(TAG, "busthread id:"+busThread.getName()+","+busThread.getId());
+     */
+    mBackgroundHandler.sendEmptyMessage(CONNECT);
+  }
+
+  /**
+   * 
+   * getSessionStatusListener(instead of getSessionStatus)
+   * 
+   * @param listener void
+   * @exception
+   * @since 1.0.0
+   */
+  public void getSessionStatusListener(ISessionStatusListener listener) {
+    mSessionStatusListener = listener;
+  }
+
+
+  /**
+   * 
+   * joinSession(the method description)
+   * 
+   * @param serviceName
+   * @param servicePort void
+   * @exception
+   * @since 1.0.0
+   */
+  public void joinSession(String serviceName, short servicePort) {
+    // mIsjoinSession, now only support one session online
+    if (!mIsjoinSession) {
+      Log.i(TAG, "namefound: " + serviceName + " portfound:" + servicePort);
+      int lSize = mServiceFoundList.size();
+      int i = 0;
+      for (i = 0; i < lSize; ++i) {
+        ServiceFound tmp = mServiceFoundList.get(i);
+        if (tmp.mServiceNameFound.equals(serviceName) && tmp.mServicePortFound == servicePort) {
+          break;
+        }
+      }
+
+      if (i >= lSize) {
+        Log.i(TAG, "the service invalid, not exist int foundlist");
+        return;
+      }
+
+      Message msg = mBackgroundHandler.obtainMessage(JOIN_SESSION);
+      msg.arg1 = servicePort;
+      msg.obj = serviceName;
+      mBackgroundHandler.sendMessage(msg);
+    } else {
+      // already join
+      if (null != mAlljoynMsgListener) {
+        mAlljoynMsgListener.onSucc("already joinSession", AlljoynConst.MSG_SUCC_DEFAULT_CODE);
+      }
+    }
+  }
+
+  /**
+   * 
+   * setAlljoynMsgListener(the method description)
+   * 
+   * @param listener void
+   * @exception
+   * @since 1.0.0
+   */
+  public void setAlljoynMsgListener(IAlljoynMsgListener listener) {
+    mAlljoynMsgListener = listener;
+  }
+
+  /**
+   * 
+   * setServiceFoundListener(for cli finding service)
+   * 
+   * @param listener void
+   * @exception
+   * @since 1.0.0
+   */
+  public void setServiceFoundListener(IServiceFoundListener listener) {
+    mServiceFoundListener = listener;
+  }
+
+  /**
+   * 
+   * setJoinListener(for app layer on service side monitoring joiners)
+   * 
+   * @param listener void
+   * @exception
+   * @since 1.0.0
+   */
+  public void setJoinListener(IJoinListener listener) {
+    mJoinListener = listener;
+  }
+
+  public boolean isBound() {
+    return mIsBound;
   }
 }
