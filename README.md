@@ -21,4 +21,7 @@ media sharing.
    
 2014-6-13 the master branch use gstreamer0.10.36, when video playing, 720p   
 is ok, but 1080p is not good, so I will create a branch named HDIm   
-with latest gstreamer, try to improve 1080p playing.
+with latest gstreamer, try to improve 1080p playing.   
+
+2014-8-5 there are many change on upnp, and TestUPnP need modified,   
+I already start coding a app with new AjUtil for video/audio streaming.
