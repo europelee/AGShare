@@ -512,6 +512,10 @@ public class EndPtService extends Service implements ServiceConfig {
   @Override
   public int onStartCommand(Intent intent, int flags, int startId) {
     Log.i("LocalService", "Received start id " + startId + ": " + intent);
+    
+    if (null == intent)
+      return START_NOT_STICKY;
+    
     Bundle bunde = intent.getExtras();
 
     // String sRole = bunde.getString(EndPtService.class.getName(), CLIENT);
@@ -525,11 +529,36 @@ public class EndPtService extends Service implements ServiceConfig {
       Log.i(TAG, "ROLE IS " + sRole + ".." + mRole.toString());
     else {
       Log.e(TAG, "ROLE IS " + sRole + " error: mRole is null");
+      return START_NOT_STICKY;
     }
 
-    mBackgroundHandler.sendEmptyMessage(CONNECT);
+    Object obj = null;
+    obj = bunde.get(EndPtService.SERVICE_NAME_KEY);
 
-    return START_NOT_STICKY;
+    if (null != obj) {
+      this.mServiceName = obj.toString();
+    }
+
+    obj = bunde.get(EndPtService.SERVICE_PORT_KEY);
+    if (null != obj) {
+      this.mServicePort =
+          (short) Integer.parseInt(bunde.get(EndPtService.SERVICE_PORT_KEY).toString());
+    }
+
+    obj = bunde.get(EndPtService.SERVICE_OBJPATH_KEY);
+    if (null != obj) {
+      this.mBusObjPath = obj.toString();
+    }
+
+    obj = bunde.get(EndPtService.CIRCLE_NAME_KEY);
+    if (null != obj) {
+      this.mCircleName = obj.toString();
+    }
+
+    mIsBound = true;
+   // mBackgroundHandler.sendEmptyMessage(CONNECT);
+
+    return START_STICKY;
   }
 
   // /bindservice
@@ -631,6 +660,7 @@ public class EndPtService extends Service implements ServiceConfig {
 
   public void onDestroy() {
     Log.i(TAG, "EndPtService onDestroy");
+    mIsBound = false;
     /* Disconnect to prevent any resource leaks. */
     mBackgroundHandler.sendEmptyMessage(DISCONNECT);
 
@@ -977,7 +1007,8 @@ public class EndPtService extends Service implements ServiceConfig {
         @Override
         public void sessionLost(int sessionId, int reason) {
           mIsjoinSession = false;
-
+        //if not, when service lost then come again, cli would not sendsignal
+          mSignalInterface = null; 
           logStatus(String.format("MyBusListener.sessionLost(sessionId = %d, reason = %d)",
               sessionId, reason), Status.OK);
 
@@ -1192,7 +1223,57 @@ public class EndPtService extends Service implements ServiceConfig {
     mJoinListener = listener;
   }
 
+  /**
+   * 
+   * isBound(the method description)
+   * @return 
+   * boolean
+   * @exception 
+   * @since  1.0.0
+   */
   public boolean isBound() {
     return mIsBound;
+  }
+  
+  /**
+   * 
+   * setRecvLen(a temp method)
+   * @param len 
+   * void
+   * @exception 
+   * @since  1.0.0
+   */
+  public void setRecvLen(int len) {
+    
+    if (null == mDev) {
+      Log.e(TAG, "mDev is null");
+      return;
+    }
+    
+    mDev.mRecvLen = len;
+  }
+  
+  /**
+   * 
+   * getRecvLen(a temp method)
+   * @return 
+   * int
+   * @exception 
+   * @since  1.0.0
+   */
+  public int getRecvLen() {
+    if (null == mDev) {
+      Log.e(TAG, "mDev is null");
+      return 0;
+    }
+    
+    int len = 0;
+    try {
+      len = mDev.getRecvLen();
+    } catch (BusException e) {
+      // TODO Auto-generated catch block
+      e.printStackTrace();
+    }
+    return len;
   }
 }

@@ -25,6 +25,9 @@ public interface DeviceInterface
 
 	@BusMethod
 	boolean getRecvStatus() throws BusException;
+
+	@BusMethod
+	int  getRecvLen() throws BusException;
 	
     @BusSignal
     public void sendInfoOnSignal(String str) throws BusException;

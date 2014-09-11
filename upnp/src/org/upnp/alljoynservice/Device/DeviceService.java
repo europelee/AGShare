@@ -16,6 +16,8 @@ public class DeviceService implements DeviceInterface, BusObject
 	private volatile boolean mIsNotify = false;
 	private boolean mIsRecv = false;
 
+	public volatile int   mRecvLen = 0;
+	
 	public String getTestRPCStr()
 	{
 		return mTestRPCStr;
@@ -95,5 +97,13 @@ public class DeviceService implements DeviceInterface, BusObject
 		// TODO Auto-generated method stub
 		
 	}
+
+	
+  @Override
+  @BusMethod
+  public  int getRecvLen() throws BusException {
+    // TODO Auto-generated method stub
+    return mRecvLen;
+  }
 
 }

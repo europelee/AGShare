@@ -25,6 +25,7 @@ public class AjBusSignalHandler
 		synchronized (AjBusSignalHandler.this)
 		{
 			// future, modify to be blocked or writed into tmp file?
+		  /*
 			if (mRecvStatus)
 			{
 				Log.i(TAG, "data still not recved by getInfoFromSignal");
@@ -32,7 +33,7 @@ public class AjBusSignalHandler
 			}
 			mRecvStatus = true;
 			mRecvStr = str;
-			
+			*/
 			// getInfoFromSignal is deprecated now!
             if (null == mIBusDataListener)
             {
@@ -48,7 +49,7 @@ public class AjBusSignalHandler
                 Log.e(TAG, "mIBusDataListener.RecvBusData fail!");
             }
             
-            mRecvStatus = false;			
+            //mRecvStatus = false;			
 		}
 	}
 

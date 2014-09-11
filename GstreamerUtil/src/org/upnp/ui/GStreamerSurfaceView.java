@@ -52,6 +52,7 @@ public class GStreamerSurfaceView extends SurfaceView
 		int wsize = View.MeasureSpec.getSize(widthMeasureSpec);
 		int hsize = View.MeasureSpec.getSize(heightMeasureSpec);
 
+		Log.i("GstreamerView", "wsize: "+wsize+" hsize:"+hsize);
 		Log.i("GStreamer", "onMeasure called with " + media_width + "x"
 				+ media_height);
 		// Obey width rules
@@ -102,7 +103,8 @@ public class GStreamerSurfaceView extends SurfaceView
 		// Obey minimum size
 		width = Math.max(getSuggestedMinimumWidth(), width);
 		height = Math.max(getSuggestedMinimumHeight(), height);
-		setMeasuredDimension(width, height);
+		//setMeasuredDimension(width, height);
+		setMeasuredDimension(wsize, hsize);
 	}
 
 }

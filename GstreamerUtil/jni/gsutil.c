@@ -865,6 +865,7 @@ static void *app_function(void *userdata) {
 
 	fin_shmfile();
 
+	recv_len = 0;
 	in_index = 0;
 	out_index = 0;
 	hunstatus = FALSE;
@@ -1112,9 +1113,23 @@ static void gst_native_pause(JNIEnv* env, jobject thiz) {
 static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) {
 
 	if (NULL == head_maped) {
-		__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
-				"could not inputdata, head_maped null");
-		return;
+
+		gboolean ans = init_shmfile(env);
+		if (FALSE == ans) {
+			iEnd = 1;
+
+			__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+					"init_shmfile fail");
+
+			return;
+		}
+
+		if (NULL == head_maped)
+		{
+			__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
+					"could not inputdata, head_maped null");
+			return;
+		}
 	}
 
 	int nArrLen = (*env)->GetArrayLength(env, jbarray);
@@ -1237,11 +1252,11 @@ static jboolean gst_native_setrecvlen(JNIEnv* env, jobject thiz, jlong jlen) {
 static void gst_native_snapshot(JNIEnv* env, jobject thiz, jstring filePath,
 		jint width) {
 	GstElement *pipeline = NULL, *sink = NULL;
-	gint width, height;
+	gint height;
 	GstSample *sample = NULL;
 	gchar *descr = NULL;
 	GError *error = NULL;
-	GdkPixbuf *pixbuf = NULL;
+	//GdkPixbuf *pixbuf = NULL;
 	gint64 duration, position;
 	GstStateChangeReturn ret;
 	gboolean res;
@@ -1372,8 +1387,8 @@ static void gst_native_snapshot(JNIEnv* env, jobject thiz, jstring filePath,
 		 * that is rounded up to the nearest multiple of 4 */
 		buffer = gst_sample_get_buffer(sample);
 		gst_buffer_map(buffer, &map, GST_MAP_READ);
-		pixbuf = gdk_pixbuf_new_from_data(map.data, GDK_COLORSPACE_RGB, FALSE,
-				8, width, height, GST_ROUND_UP_4(width * 3), NULL, NULL);
+		//pixbuf = gdk_pixbuf_new_from_data(map.data, GDK_COLORSPACE_RGB, FALSE,
+		//		8, width, height, GST_ROUND_UP_4(width * 3), NULL, NULL);
 
 		getExtPath(env);
 		//todo
@@ -1382,8 +1397,8 @@ static void gst_native_snapshot(JNIEnv* env, jobject thiz, jstring filePath,
 		savePath[PATH_MAX-1] = 0;
 
 		/* save the pixbuf */
-		gdk_pixbuf_save(pixbuf, savePath, "png",
-				&error, NULL);
+		//gdk_pixbuf_save(pixbuf, savePath, "png",
+		//		&error, NULL);
 		gst_buffer_unmap(buffer, &map);
 	} else {
 		g_print("could not make snapshot\n");
