@@ -2,6 +2,7 @@ ControlPanel
 HomeInfoCenter
 upnp/gen
 upnp/bin
+upnp/jni
 TestUPnP/gen
 TestUPnP/bin
 TestUPnP/libs/upnp.jar

@@ -139,7 +139,8 @@ public class GstUtilNative
 	 */
 	public void inject2Pipe(byte []data)
 	{
-		if (true == mIsInited)
+		//if (true == mIsInited)
+	    //the above if should be removed, input not related with play!
 		nativeInputData(data);
 	}
 	

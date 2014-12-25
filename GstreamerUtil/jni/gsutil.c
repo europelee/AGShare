@@ -694,13 +694,22 @@ static void eos_cb(GstBus *bus, GstMessage *msg, CustomData *data) {
 
 }
 
+static void clearFlags() {
+	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "clearFlags");
+	recv_len = 0;
+	in_index = 0;
+	out_index = 0;
+	hunstatus = FALSE;
+
+}
+
 /* Main method for the native code. This is executed on its own thread. */
 static void *app_function(void *userdata) {
 
 	gst_debug_set_default_threshold(GST_LEVEL_DEBUG);
 	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "app_function start");
 
-	in_index = 0;
+	//in_index = 0;
 	out_index = 0;
 
 	guint flags;
@@ -865,13 +874,12 @@ static void *app_function(void *userdata) {
 
 	fin_shmfile();
 
-	recv_len = 0;
-	in_index = 0;
-	out_index = 0;
-	hunstatus = FALSE;
+	clearFlags();
 
 	return NULL;
 }
+
+
 
 static void getExtPath(JNIEnv* env) {
 	jclass cls_Env = (*env)->FindClass(env, "android/os/Environment");
@@ -1042,6 +1050,8 @@ static void gst_native_finalize(JNIEnv* env, jobject thiz) {
 	//anothread may use fd, so join it first
 	fin_shmfile();
 
+	clearFlags();
+
 	// Destory mutex
 #if EN_MUTEX
 	if ((NULL != pmutex) && (0 != pthread_mutex_destroy(pmutex))) {
@@ -1064,6 +1074,32 @@ static void gst_native_finalize(JNIEnv* env, jobject thiz) {
 	GST_DEBUG("Done finalizing");
 }
 
+
+static int checkGstAppThreadlive() {
+
+	int ret = 0;
+	int pthread_kill_err;
+	pthread_kill_err = pthread_kill(gst_app_thread, 0);
+
+	if (pthread_kill_err == ESRCH)
+	{
+		__android_log_print(ANDROID_LOG_INFO, TAGSTR, "threadid %u not exist", (unsigned int) gst_app_thread);
+		ret = 0;
+	}
+	else if (pthread_kill_err == EINVAL)
+	{
+		__android_log_print(ANDROID_LOG_INFO, TAGSTR, "invalid signal");
+		ret = 0;
+	}
+	else
+	{
+		__android_log_print(ANDROID_LOG_INFO, TAGSTR, "threadid %u still live", (unsigned int) gst_app_thread);
+		ret = 1;
+	}
+
+	return ret;
+}
+
 /* Set pipeline to PLAYING state */
 static void gst_native_play(JNIEnv* env, jobject thiz) {
 
@@ -1074,12 +1110,10 @@ static void gst_native_play(JNIEnv* env, jobject thiz) {
 	}
 	GST_DEBUG("Setting state to PLAYING");
 	g_print("data is Setting state to PLAYING!");
-
+	g_print("iEnd is %d\n", iEnd);
 	if (iEnd == 1) {
 
 		iEnd = 0;
-		//check pipleline
-		//if (-1 == in_fd || -1 == out_fd)
 
 		//processing unexception
 		{
@@ -1091,13 +1125,10 @@ static void gst_native_play(JNIEnv* env, jobject thiz) {
 			}
 		}
 
-		pthread_create(&gst_app_thread, NULL, &app_function, data);
-
 	}
 
-	//check pipeline is ok(it generated in another thread)
-	// then go on
-
+	if (0 == checkGstAppThreadlive())
+	pthread_create(&gst_app_thread, NULL, &app_function, data);
 }
 
 /* Set pipeline to PAUSED state */
@@ -1111,6 +1142,11 @@ static void gst_native_pause(JNIEnv* env, jobject thiz) {
 }
 
 static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) {
+
+	if (0 >= recv_len) {
+
+		return;
+	}
 
 	if (NULL == head_maped) {
 
@@ -1126,10 +1162,19 @@ static void gst_native_inputdata(JNIEnv* env, jobject thiz, jbyteArray jbarray) 
 
 		if (NULL == head_maped)
 		{
+			iEnd = 1;
 			__android_log_print(ANDROID_LOG_ERROR, TAGSTR,
 					"could not inputdata, head_maped null");
 			return;
 		}
+
+		//for case:
+		//recv data before opening mmplayer
+		//else cause fin_shmfile when play trrigered!
+		g_print("iEnd is %d\n", iEnd);
+		iEnd = 0;
+
+		in_index = 0; //not in app_function!
 	}
 
 	int nArrLen = (*env)->GetArrayLength(env, jbarray);
