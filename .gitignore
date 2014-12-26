@@ -3,6 +3,7 @@ HomeInfoCenter
 upnp/gen
 upnp/bin
 upnp/jni
+TestUPnP
 TestUPnP/gen
 TestUPnP/bin
 TestUPnP/libs/upnp.jar
