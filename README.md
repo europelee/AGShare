@@ -14,6 +14,10 @@ from DeviceInterface/DeviceService, yes, the wrapper does
 one thing well, let app layer parsing data, modular programing,
 low coupling.   
 
+notice: you need to download gstreamer sdk for building gstutil.so from 
+gstreamerutil, link: http://gstreamer.freedesktop.org/data/pkg/android/ 
+the project uses 1.2.4 version.
+
 2014-5-18 add GstreamerUtil module, implement audio streaming
 by alljoyn(Communication capability) and Gstreamer(media han-
 dling technology), you can try it with TestUPnP, enjoy multi-
