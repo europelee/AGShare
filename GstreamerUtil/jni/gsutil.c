@@ -1078,6 +1078,7 @@ static void gst_native_finalize(JNIEnv* env, jobject thiz) {
 static int checkGstAppThreadlive() {
 
 	int ret = 0;
+#if 0
 	int pthread_kill_err;
 	pthread_kill_err = pthread_kill(gst_app_thread, 0);
 
@@ -1092,6 +1093,18 @@ static int checkGstAppThreadlive() {
 		ret = 0;
 	}
 	else
+	{
+		__android_log_print(ANDROID_LOG_INFO, TAGSTR, "threadid %u still live", (unsigned int) gst_app_thread);
+		ret = 1;
+	}
+#endif
+
+	int try_join_err = pthread_tryjoin_np(gst_app_thread, NULL);
+	if (0 == try_join_err) {
+		__android_log_print(ANDROID_LOG_INFO, TAGSTR, "threadid %u not exist", (unsigned int) gst_app_thread);
+		ret = 0;
+	}
+	else if (EBUSY == try_join_err)
 	{
 		__android_log_print(ANDROID_LOG_INFO, TAGSTR, "threadid %u still live", (unsigned int) gst_app_thread);
 		ret = 1;
@@ -1127,7 +1140,7 @@ static void gst_native_play(JNIEnv* env, jobject thiz) {
 
 	}
 
-	if (0 == checkGstAppThreadlive())
+	//if (0 == checkGstAppThreadlive())
 	pthread_create(&gst_app_thread, NULL, &app_function, data);
 }
 
