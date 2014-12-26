@@ -105,6 +105,8 @@ static int iPreBuff = 0; // 0-100
 static unsigned long nBuff = 0;
 static gboolean hunstatus = FALSE;
 
+volatile int  g_gstthread_alive = 0;
+
 /*
  * Private methods
  */
@@ -706,6 +708,8 @@ static void clearFlags() {
 /* Main method for the native code. This is executed on its own thread. */
 static void *app_function(void *userdata) {
 
+	g_gstthread_alive = 1;
+
 	gst_debug_set_default_threshold(GST_LEVEL_DEBUG);
 	__android_log_print(ANDROID_LOG_INFO, TAGSTR, "app_function start");
 
@@ -875,6 +879,8 @@ static void *app_function(void *userdata) {
 	fin_shmfile();
 
 	clearFlags();
+
+	g_gstthread_alive = 0;
 
 	return NULL;
 }
@@ -1078,6 +1084,7 @@ static void gst_native_finalize(JNIEnv* env, jobject thiz) {
 static int checkGstAppThreadlive() {
 
 	int ret = 0;
+	//pthread_kill may cause SIGSEGV on some linux kernel like 3.0.8
 #if 0
 	int pthread_kill_err;
 	pthread_kill_err = pthread_kill(gst_app_thread, 0);
@@ -1099,12 +1106,12 @@ static int checkGstAppThreadlive() {
 	}
 #endif
 
-	int try_join_err = pthread_tryjoin_np(gst_app_thread, NULL);
-	if (0 == try_join_err) {
+	if (0 == g_gstthread_alive)
+	{
 		__android_log_print(ANDROID_LOG_INFO, TAGSTR, "threadid %u not exist", (unsigned int) gst_app_thread);
 		ret = 0;
 	}
-	else if (EBUSY == try_join_err)
+	else
 	{
 		__android_log_print(ANDROID_LOG_INFO, TAGSTR, "threadid %u still live", (unsigned int) gst_app_thread);
 		ret = 1;
@@ -1140,7 +1147,7 @@ static void gst_native_play(JNIEnv* env, jobject thiz) {
 
 	}
 
-	//if (0 == checkGstAppThreadlive())
+	if (0 == checkGstAppThreadlive())
 	pthread_create(&gst_app_thread, NULL, &app_function, data);
 }
 
