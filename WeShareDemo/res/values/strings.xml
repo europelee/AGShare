@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="app_name">WeShareDemo</string>
+    <string name="action_settings">Settings</string>
+    <string name="action_videoview">displayer</string>
+
+    <string-array name="share_ids">
+        <item>video</item>
+        <item>music</item>
+        <item>picture</item>
+        <item>search</item>
+    </string-array>
+
+    <string name="button_play">play</string>
+    <string name="button_stop">pause</string>
+    <string name="button_plus">plus</string>
+    <string name="button_minus">minus</string>
+    <string name="button_maxwin">maxwin</string>
+    <string name="button_exitmmp">exitmmp</string>
+    <!--
+    <string name="title_section1">video</string>
+    <string name="title_section2">music</string>
+    <string name="title_section3">picture</string>
+	<string name="title_section4">apk</string>
+    -->
+
+</resources>

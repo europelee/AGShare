@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center_vertical"
+    android:orientation="vertical" >
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dip"
+        android:gravity="center_horizontal"
+        android:orientation="horizontal" >
+
+        <ImageButton
+            android:id="@+id/button_play"
+            android:layout_width="wrap_content"
+            android:layout_height="fill_parent"
+            android:contentDescription="@string/button_play"
+            android:src="@android:drawable/ic_media_play"
+            android:text="@string/button_play" />
+
+        <ImageButton
+            android:id="@+id/button_stop"
+            android:layout_width="wrap_content"
+            android:layout_height="fill_parent"
+            android:contentDescription="@string/button_stop"
+            android:src="@android:drawable/ic_media_pause"
+            android:text="@string/button_stop" />
+
+        <ImageButton
+            android:id="@+id/button_maxwin"
+            android:layout_width="wrap_content"
+            android:layout_height="fill_parent"
+            android:contentDescription="@string/button_maxwin"
+            android:src="@android:drawable/picture_frame"
+            android:text="@string/button_maxwin" />
+<!-- 
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_horizontal"
+            android:weightSum="2" >
+ -->
+            <ImageButton
+                android:id="@+id/button_minus"
+                android:layout_width="wrap_content"
+                android:layout_height="fill_parent"
+                android:layout_weight="1"
+                android:contentDescription="@string/button_minus"
+                android:scaleType="fitCenter"
+                android:src="@android:drawable/btn_minus"
+                android:text="@string/button_minus" />
+
+            <ImageButton
+                android:id="@+id/button_plus"
+                android:layout_width="wrap_content"
+                android:layout_height="fill_parent"
+                android:layout_weight="1"
+                android:contentDescription="@string/button_plus"
+                android:scaleType="fitCenter"
+                android:src="@android:drawable/btn_plus"
+                android:text="@string/button_plus" />
+<!-- 
+            </LinearLayout>
+-->
+        <ImageButton
+            android:id="@+id/button_exitmmp"
+            android:layout_width="wrap_content"
+            android:layout_height="fill_parent"
+            android:contentDescription="@string/button_exitmmp"
+            android:src="@android:drawable/btn_dialog"
+            android:text="@string/button_exitmmp" />
+    </LinearLayout>
+
+    <org.upnp.ui.GStreamerSurfaceView
+        android:id="@+id/surface_video"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <TextView
+        android:id="@+id/gst_tip"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content" />
+
+</LinearLayout>
