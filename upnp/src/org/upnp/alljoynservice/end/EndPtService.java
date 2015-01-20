@@ -381,6 +381,9 @@ public class EndPtService extends Service implements ServiceConfig {
 
       mServiceFoundList.add(new ServiceFound(name, transport));
 
+      //for cli
+      mCircleName = name.substring(namePrefix.length()+1);
+      
       if (null != mServiceFoundListener) {
         mServiceFoundListener.addServiceFound(new ServiceFound(name, transport));
       }
@@ -444,7 +447,11 @@ public class EndPtService extends Service implements ServiceConfig {
           mClientList.remove((long) sessionId);
 
           mAwareLosSess = true;
-
+          
+          if (null != mJoinListener) {
+            mJoinListener.getSessionStatus(mCircleName, false);
+          }
+          
           mSignalInterface = null;
 
           logStatus(
@@ -562,7 +569,7 @@ public class EndPtService extends Service implements ServiceConfig {
   }
 
   // /bindservice
-  private final IBinder binder = new LocalBinder();
+  private IBinder binder = null;
 
   public class LocalBinder extends Binder {
     public EndPtService getService() {
@@ -620,10 +627,10 @@ public class EndPtService extends Service implements ServiceConfig {
       this.mCircleName = obj.toString();
     }
 
-    // mBackgroundHandler.sendEmptyMessage(CONNECT);
-
     mIsBound = true;
-
+    
+    binder  = new LocalBinder();
+    
     return binder;
   }
 
@@ -744,6 +751,8 @@ public class EndPtService extends Service implements ServiceConfig {
       return;
     }
 
+    Log.d(TAG, "bus uniquename:"+mBus.getUniqueName());
+    
     mIsConnected = true;
 
     // 3.2 signalhandler that will be used to receive signals
@@ -825,7 +834,9 @@ public class EndPtService extends Service implements ServiceConfig {
             sessionId, joiner));
 
         mSessionId = sessionId;
-
+        
+        
+        
         // in fact, endptservice only support one session with
         // multipoints
         // so, we don't check sessionid value is same as
@@ -844,6 +855,7 @@ public class EndPtService extends Service implements ServiceConfig {
         //
         putAdd((long) mSessionId, joiner);
         if (null != mJoinListener) {
+          mJoinListener.getSessionStatus(mCircleName, true);
           mJoinListener.addJoiner((long) sessionId, joiner);
         }
         // for monitoring cli
@@ -1013,9 +1025,28 @@ public class EndPtService extends Service implements ServiceConfig {
               sessionId, reason), Status.OK);
 
           if (null != mSessionStatusListener) {
-            mSessionStatusListener.getSessionStatus(mIsjoinSession);
+            mSessionStatusListener.getSessionStatus(mCircleName, mIsjoinSession);
           }
         }
+        
+        @Override
+        public void sessionMemberAdded(int sessionId, String uniqueName) {
+          Log.i(TAG, "notice  add:" + "sessid:" + sessionId + " uniquename:" + uniqueName);
+          putAdd((long) sessionId, uniqueName);
+          if (null != mSessionStatusListener) {
+            mSessionStatusListener.addJoiner((long) sessionId, uniqueName);
+          }
+        }
+
+        @Override
+        public void sessionMemberRemoved(int sessionId, String uniqueName) {
+          Log.i(TAG, "notice remove:" + "sessid:" + sessionId + " uniquename:" + uniqueName);
+          delElem((long) sessionId, uniqueName);
+          if (null != mSessionStatusListener) {
+            mSessionStatusListener.delJoiner((long) sessionId, uniqueName);
+          }
+        }
+        
       });
     } catch (Exception ex) {
       Log.e(TAG, "doJoinSession joinSession error");
@@ -1044,7 +1075,7 @@ public class EndPtService extends Service implements ServiceConfig {
     if (Status.ALLJOYN_JOINSESSION_REPLY_ALREADY_JOINED == status) {
       mIsjoinSession = true;
       if (null != mSessionStatusListener) {
-        mSessionStatusListener.getSessionStatus(mIsjoinSession);
+        mSessionStatusListener.getSessionStatus(mCircleName, mIsjoinSession);
       }
       return true;
     }
@@ -1070,7 +1101,7 @@ public class EndPtService extends Service implements ServiceConfig {
     mIsjoinSession = true;
 
     if (null != mSessionStatusListener) {
-      mSessionStatusListener.getSessionStatus(mIsjoinSession);
+      mSessionStatusListener.getSessionStatus(mCircleName, mIsjoinSession);
     }
 
     if (mDevI == null) {

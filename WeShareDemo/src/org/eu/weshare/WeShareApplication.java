@@ -15,7 +15,8 @@ public class WeShareApplication extends Application {
     System.loadLibrary("gsutil");
   }
 
-  public static UPnPService localService = null;
+  public static UPnPService localSvrService = null;
+  public static UPnPService localCliService = null;
   public static GstreamerService mGstService = null;
 
   @Override
@@ -23,9 +24,13 @@ public class WeShareApplication extends Application {
     // TODO Auto-generated method stub
     super.onCreate();
 
-    localService = new UPnPService();
     mGstService = GstreamerService.getInstance();
-    localService.setSourceListener(mGstService.mInputSourceListener);
+    
+    localSvrService = new UPnPService();
+    localSvrService.setSourceListener(mGstService.mInputSourceListener);
+    
+    localCliService = new UPnPService();
+    localCliService.setSourceListener(mGstService.mInputSourceListener);
   }
 
   @Override

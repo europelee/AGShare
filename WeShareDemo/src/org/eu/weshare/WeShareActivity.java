@@ -114,11 +114,15 @@ public class WeShareActivity extends FragmentActivity implements ActionBar.TabLi
 
     super.onDestroy();
 
-    UPnPService localService = WeShareApplication.localService;
+    UPnPService localService = WeShareApplication.localSvrService;
     if (null != localService) {
       localService.stopService(this);
     }
 
+    localService = WeShareApplication.localCliService;
+    if (null != localService) {
+      localService.stopService(this);
+    }    
 
     if (null != mMMPlayer) {
       Log.i(TAG, "destroyVideoView");

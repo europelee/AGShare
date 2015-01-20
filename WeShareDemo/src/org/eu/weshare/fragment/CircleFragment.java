@@ -42,7 +42,7 @@ public class CircleFragment extends DialogFragment {
   private static final String DEFAULT_SERVICE_NAME = "default";
   
   private UPnPService localService = null;
-  private boolean mConnStatus = false;
+  
   private String mModelName = null;
   private static final String EDIT_SERVICENAME_HINT = "请设定服务名，若无默认:";
   private EditText mServiceNameEdit = null;
@@ -52,7 +52,7 @@ public class CircleFragment extends DialogFragment {
   private ListView mServiceListView;
   private List<HashMap<String, String>> mServiceList = new ArrayList<HashMap<String, String>>();
   private ArrayAdapter<HashMap<String, String>> mAdapter;
-
+  
   public static CircleFragment newInstance() {
     CircleFragment f = new CircleFragment();
     return f;
@@ -66,7 +66,7 @@ public class CircleFragment extends DialogFragment {
     public void getAdvStatus(boolean status) {
       // TODO Auto-generated method stub
       if (true == status) {
-        mConnStatus = status;
+       
         Toast.makeText(CircleFragment.this.getActivity(), "adv succ!", Toast.LENGTH_LONG)
             .show();
 
@@ -88,7 +88,7 @@ public class CircleFragment extends DialogFragment {
     public void getJoinStatus(boolean status) {
       // TODO Auto-generated method stub
       if (true == status) {
-        mConnStatus = status;
+       
         Toast.makeText(CircleFragment.this.getActivity(), "join circle succ!", Toast.LENGTH_LONG)
             .show();
 
@@ -110,7 +110,13 @@ public class CircleFragment extends DialogFragment {
     public void foundService(String name, short port) {
       // TODO Auto-generated method stub
       Log.i(TAG, "foundService:" + name + ":" + port);
-      // localService.joinCircle(name, port);
+      
+      
+      if (true == checkLocalAjService(name)) {
+        Log.i(TAG, name+" is localservice");
+        return;
+      }
+      
       HashMap<String, String> tmp = new HashMap<String, String>();
       tmp.put(HASHKEY_SERVICE_NAME, name);
       tmp.put(HASHKEY_SERVICE_PORT, String.valueOf((int) port));
@@ -172,8 +178,6 @@ public class CircleFragment extends DialogFragment {
 
     View root = inflater.inflate(R.layout.fragment_circle, container, false);
 
-    localService = WeShareApplication.localService;
-
     String devName = getDevModelName();
     mServiceNameEdit = (EditText) root.findViewById(R.id.edit_servicename);
     mServiceNameEdit.setHint("[" + EDIT_SERVICENAME_HINT + devName + "]");
@@ -184,7 +188,7 @@ public class CircleFragment extends DialogFragment {
       @Override
       public void onClick(View arg0) {
         // TODO Auto-generated method stub
-        localService.stopService(CircleFragment.this.getActivity());       
+        //localService.stopService(CircleFragment.this.getActivity());       
       }
     });
     
@@ -194,6 +198,8 @@ public class CircleFragment extends DialogFragment {
       @Override
       public void onClick(View arg0) {
         // TODO Auto-generated method stub
+        localService = WeShareApplication.localSvrService;
+        
         mModelName = mServiceNameEdit.getText().toString();
         if (0 == mModelName.length()) {
           mModelName = getDevModelName();
@@ -223,6 +229,7 @@ public class CircleFragment extends DialogFragment {
             while (true == localService.isServiceRunning()) {
               try {
                 Thread.sleep(1000);
+                Log.i(TAG, "waiting...");
               } catch (InterruptedException e) {
                 // TODO Auto-generated catch block
                 e.printStackTrace();
@@ -253,6 +260,7 @@ public class CircleFragment extends DialogFragment {
       @Override
       public void onClick(View arg0) {
         // TODO Auto-generated method stub
+        localService = WeShareApplication.localCliService;
         
         if (true == localService.isBound()) {
           Toast.makeText(CircleFragment.this.getActivity(), "search again!", Toast.LENGTH_LONG)
@@ -314,7 +322,7 @@ public class CircleFragment extends DialogFragment {
         short port = Short.parseShort(tmp.get(HASHKEY_SERVICE_PORT));
 
         Log.i(TAG, name + ":" + port);
-        localService.joinCircle(name, port);
+        WeShareApplication.localCliService.joinCircle(name, port);
 
 
       }
@@ -334,26 +342,17 @@ public class CircleFragment extends DialogFragment {
     super.onStart();
 
     // below code would override customsize by main_bg.png in fragment_circle.xml
-
-
-    /*
-     * // change dialog width if (getDialog() != null) {
-     * 
-     * int fullWidth = getDialog().getWindow().getAttributes().width;
-     * 
-     * if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB_MR2) { Display display =
-     * getActivity().getWindowManager().getDefaultDisplay(); Point size = new Point();
-     * display.getSize(size); fullWidth = size.x; } else { Display display =
-     * getActivity().getWindowManager().getDefaultDisplay(); fullWidth = display.getWidth(); }
-     * 
-     * final int padding = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 24,
-     * getResources() .getDisplayMetrics());
-     * 
-     * int w = fullWidth - padding; int h = getDialog().getWindow().getAttributes().height;
-     * 
-     * getDialog().getWindow().setLayout(w, h); }
-     */
   }
   
-  
+  private boolean checkLocalAjService(String serviceName) {
+
+    Log.d(TAG, "checkLocalAjService "+serviceName+" cmp "+WeShareApplication.localSvrService.getCircleName());
+    boolean ans = WeShareApplication.localSvrService.isServiceRunning();
+    if (false == ans) {
+      Log.d(TAG, "svrservice not running");
+      return false;
+    }
+    
+    return serviceName.endsWith(WeShareApplication.localSvrService.getCircleName());
+  }
 }

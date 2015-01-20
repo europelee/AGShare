@@ -15,4 +15,8 @@ public class AlljoynConst {
   public static final int MSG_SUCC_ALLJOYN_SERVICE_EXIT = 21;
   public static final int MSG_SUCC_CONN_CODE = 22;
   public static final int MSG_SUCC_AD_SERVICE_CODE = 23;
+  
+  public static final String CLIENT = "client";
+  public static final String SERVER = "server";
+  
 }

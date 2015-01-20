@@ -16,6 +16,10 @@ import org.eu.weshare.R;
 import org.eu.weshare.WeShareApplication;
 import org.eu.weshare.upnpservice.UPnPService;
 
+import android.app.AlertDialog;
+import android.content.DialogInterface;
+import android.content.DialogInterface.OnClickListener;
+import android.content.DialogInterface.OnMultiChoiceClickListener;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -42,6 +46,8 @@ import android.widget.FrameLayout;
 import android.widget.GridView;
 import android.widget.AdapterView.OnItemClickListener;
 import android.widget.FrameLayout.LayoutParams;
+import android.widget.ListView;
+import android.widget.Toast;
 
 
 
@@ -54,7 +60,7 @@ public class ShareDataFragment extends Fragment {
 
   private ArrayList<ImageItem> mUserData = null;
   private int mPagePos = -1;
-  private UPnPService mUPnPService = null;
+  // private UPnPService mUPnPService = null;
 
   FileSortHelper sort = new FileSortHelper();
   private HashMap<Integer, FileInfo> mFileNameList = new HashMap<Integer, FileInfo>();
@@ -67,8 +73,6 @@ public class ShareDataFragment extends Fragment {
   public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
 
     Log.i(TAG, "onCreateView");
-
-    mUPnPService = WeShareApplication.localService;
 
     mPagePos = this.getArguments().getInt(ARG_SECTION_NUMBER);
 
@@ -97,7 +101,8 @@ public class ShareDataFragment extends Fragment {
         // send selected file to peer(s)
         String file = mUserData.get(position).getFilePath();
         Log.i(TAG, file);
-        mUPnPService.shareContent(file);
+
+        fileShareSetting(file);
       }
     });
     params.setMargins(margin, margin, margin, margin);
@@ -349,6 +354,74 @@ public class ShareDataFragment extends Fragment {
       } while (cursor.moveToNext());
     }
 
+
+  }
+
+
+  private void fileShareSetting(final String file) {
+
+    ArrayList<CharSequence> list = new ArrayList<CharSequence>();
+
+    if (false == WeShareApplication.localSvrService.sessionLost()) {
+      list.add(WeShareApplication.localSvrService.getCirName());
+    }
+
+    if (false == WeShareApplication.localCliService.sessionLost()) {
+      list.add(WeShareApplication.localCliService.getCirName());
+    }
+
+    if (list.size() <= 0) {
+      return;
+    }
+
+    final CharSequence[] items;
+    items = list.toArray(new CharSequence[list.size()]);
+
+    AlertDialog.Builder builder = new AlertDialog.Builder(this.getActivity());
+
+    builder.setTitle("Pick a color");
+
+    final boolean[] checkItems = new boolean[list.size()];
+    for (int i = 0; i < list.size(); ++i) {
+      checkItems[i] = false;
+    }
+    builder.setMultiChoiceItems(items, checkItems, new OnMultiChoiceClickListener() {
+
+      @Override
+      public void onClick(DialogInterface dialog, int which, boolean isChecked) {
+        // TODO Auto-generated method stub
+      }
+    });
+
+    builder.setNegativeButton("取消", null);
+
+    builder.setPositiveButton("确定", new OnClickListener() {
+
+      @Override
+      public void onClick(DialogInterface arg0, int arg1) {
+        // TODO Auto-generated method stub
+        String s = "您选择了：\n";
+
+        for (int i = 0; i < checkItems.length; i++) {
+          if (true == checkItems[i]) {
+            s += items[i] + "\n";
+            if (items[i].equals(WeShareApplication.localSvrService.getCirName())) {
+              WeShareApplication.localSvrService.shareContent(file);
+            } else if (items[i].equals(WeShareApplication.localCliService.getCirName())) {
+              WeShareApplication.localCliService.shareContent(file);
+            }
+          }
+        }
+
+
+        Toast.makeText(ShareDataFragment.this.getActivity().getApplicationContext(), s,
+            Toast.LENGTH_SHORT).show();
+
+      }
+
+    });
+
+    builder.show();
 
   }
 }

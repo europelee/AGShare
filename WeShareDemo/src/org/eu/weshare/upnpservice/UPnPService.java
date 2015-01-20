@@ -15,6 +15,8 @@ import org.eu.weshare.mediaplayservice.IInputSourceListener;
 
 import org.upnp.alljoynservice.ConstData.AlljoynConst;
 import org.upnp.alljoynservice.end.AlljoynErr;
+import org.upnp.alljoynservice.end.BaseEndService;
+import org.upnp.alljoynservice.end.CliEndService;
 import org.upnp.alljoynservice.end.EndPtService;
 import org.upnp.alljoynservice.end.IAdvListener;
 import org.upnp.alljoynservice.end.IAlljoynMsgListener;
@@ -25,6 +27,7 @@ import org.upnp.alljoynservice.end.IJoinListener;
 import org.upnp.alljoynservice.end.IServiceFoundListener;
 import org.upnp.alljoynservice.end.ISessionStatusListener;
 import org.upnp.alljoynservice.end.ServiceFound;
+import org.upnp.alljoynservice.end.SvrEndService;
 
 import android.content.ComponentName;
 import android.content.Context;
@@ -64,6 +67,9 @@ public class UPnPService {
   private boolean mIsCli = true;
   private boolean mBRun = false;
 
+  private volatile boolean mIsLost = true;
+  private String mCirName = "";
+  
   // for app layer
   private IGetServiceListener mCircleServicelistener = null;
   private IJoinCircleListener mJoinCircleListener = null;
@@ -153,6 +159,14 @@ public class UPnPService {
       Log.i(TAG, "sessionid: " + sessionId + " joinerName" + joinerName);
     }
 
+    @Override
+    public void getSessionStatus(String serviceName, boolean sessionStatus) {
+      // TODO Auto-generated method stub
+      Log.i(TAG, "svr session-status:"+sessionStatus);
+      mCirName = serviceName;
+      mIsLost = !sessionStatus;
+    }
+
   }
 
   private class ServiceFoundListener implements IServiceFoundListener {
@@ -179,12 +193,26 @@ public class UPnPService {
   private class SessionStatusListener implements ISessionStatusListener {
 
     @Override
-    public void getSessionStatus(boolean status) {
+    public void getSessionStatus(String serviceName, boolean status) {
       // TODO Auto-generated method stub
       Log.i(TAG, "session-staus:" + status);
+      mCirName = serviceName;
+      mIsLost = !status;
       if (null != mJoinCircleListener) {
         mJoinCircleListener.getJoinStatus(status);
       }
+    }
+
+    @Override
+    public void addJoiner(long sessionId, String joinerName) {
+      // TODO Auto-generated method stub
+      Log.i(TAG, "sessionid: " + sessionId + " joinerName" + joinerName);
+    }
+
+    @Override
+    public void delJoiner(long sessionId, String joinerName) {
+      // TODO Auto-generated method stub
+      Log.i(TAG, "sessionid: " + sessionId + " joinerName" + joinerName);
     }
 
   }
@@ -197,15 +225,19 @@ public class UPnPService {
   /**
    * may support two service: cli and svr
    */
-  private EndPtService mEndService = null;
+  private BaseEndService mEndService = null;
 
   private boolean mIsBound = false;
 
   private ServiceConnection mConnection = new ServiceConnection() {
     public void onServiceConnected(ComponentName className, IBinder localBinder) {
 
-      mEndService = ((EndPtService.LocalBinder) localBinder).getService();
+      if (className.getClassName().equals(SvrEndService.class.getName()))
+      mEndService = ((SvrEndService.LocalBinder) localBinder).getService();
 
+      if (className.getClassName().equals(CliEndService.class.getName()))
+      mEndService = ((CliEndService.LocalBinder) localBinder).getService();
+      
     }
 
     public void onServiceDisconnected(ComponentName arg0) {
@@ -236,7 +268,14 @@ public class UPnPService {
     }
 
     mContext = context;
-    Intent intent = new Intent(context, EndPtService.class);
+    Intent intent = null;
+    if (true == isCli) {
+      intent = new Intent(context, CliEndService.class);
+    }
+    else {
+      intent = new Intent(context, SvrEndService.class);
+    }
+    
     Bundle bundle = new Bundle();
 
     mIsCli = isCli;
@@ -258,7 +297,7 @@ public class UPnPService {
     bundle.putString(EndPtService.CIRCLE_NAME_KEY, mCircleName);
 
     intent.putExtras(bundle);
-
+    
     boolean ans = context.bindService(intent, mConnection, Context.BIND_AUTO_CREATE);
 
     if (!ans) {
@@ -290,25 +329,27 @@ public class UPnPService {
 
       }
 
-      if (null == mEndService || false == mEndService.isBound()) return;
+      if (null == mEndService || false == mEndService.isBound()) {
+        return;
+      }
 
 
 
-      mEndService.setAlljoynMsgListener(mAlljoynMsgListener);
-      mEndService.setBusDataListener(mBusDataListener);
+      mEndService.getAjCommMgr().setAlljoynMsgListener(mAlljoynMsgListener);
+      mEndService.getAjCommMgr().setBusDataListener(mBusDataListener);
 
       if (true == mIsCli) {
-        mEndService.setServiceFoundListener(mServiceFoundListener);
-        mEndService.getSessionStatusListener(mSessionStatusListener);
+        mEndService.getAjCommMgr().setServiceFoundListener(mServiceFoundListener);
+        mEndService.getAjCommMgr().getSessionStatusListener(mSessionStatusListener);
 
       } else {
-        mEndService.setJoinListener(mJoinListener);
+        mEndService.getAjCommMgr().setJoinListener(mJoinListener);
       }
 
       // need waiting onbind finish!
       // todo for waiting
-
-      mEndService.start();
+     
+      mEndService.getAjCommMgr().connect();
     }
 
   }
@@ -366,7 +407,7 @@ public class UPnPService {
    * @since 1.0.0
    */
   public void joinCircle(String name, short port) {
-    mEndService.joinSession(name, port);
+    mEndService.getAjCommMgr().joinSession(name, port);
   }
 
   /**
@@ -417,7 +458,7 @@ public class UPnPService {
    * @since 1.0.0
    */
   public boolean sendOnSignal(String str) {
-    return mEndService.sendOverSignal(str);
+    return mEndService.getAjCommMgr().sendOverSignal(str);
   }
 
   /**
@@ -430,7 +471,7 @@ public class UPnPService {
    * @since 1.0.0
    */
   public boolean sendOnSignal(byte[] data) {
-    return mEndService.sendOverSignal(data);
+    return mEndService.getAjCommMgr().sendOverSignal(data);
   }
 
   public void setBusDataListener(IBusDataListener l) {
@@ -455,7 +496,34 @@ public class UPnPService {
     shareThread.start();
   
   }
-
+  
+  /**
+   * 
+   * getCirName(the method description)
+   * @return 
+   * String
+   * @exception 
+   * @since  1.0.0
+   */
+  public String getCirName() {
+    return mCirName;
+  }
+  
+  public String getCircleName() {
+    return mCircleName;
+  }
+  /**
+   * 
+   * sessionLost(the method description)
+   * @return 
+   * boolean
+   * @exception 
+   * @since  1.0.0
+   */
+  public boolean  sessionLost () {
+    return mIsLost;
+  }
+  
   private boolean doSendRaw(String fileName) {
     Log.d(TAG, fileName);
 

@@ -12,4 +12,6 @@ public interface IJoinListener {
   public void addJoiner(long sessionId, String joinerName);
 
   public void delJoiner(long sessionId, String joinerName);
+  
+  public void getSessionStatus(String serviceName, boolean sessionStatus);
 }
