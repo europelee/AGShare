@@ -361,16 +361,22 @@ public class ShareDataFragment extends Fragment {
   private void fileShareSetting(final String file) {
 
     ArrayList<CharSequence> list = new ArrayList<CharSequence>();
-
-    if (false == WeShareApplication.localSvrService.sessionLost()) {
-      list.add(WeShareApplication.localSvrService.getCirName());
+    String nameCB = "";
+    
+    if (true == WeShareApplication.localSvrService.isBound() && false == WeShareApplication.localSvrService.sessionLost()) {
+      nameCB = WeShareApplication.localSvrService.getCirNameCB();
+      Log.d(TAG, "add svr name "+nameCB);
+      list.add(nameCB);
     }
 
-    if (false == WeShareApplication.localCliService.sessionLost()) {
-      list.add(WeShareApplication.localCliService.getCirName());
+    if (true == WeShareApplication.localCliService.isBound() && false == WeShareApplication.localCliService.sessionLost()) {
+      nameCB = WeShareApplication.localCliService.getCirNameCB();
+      Log.d(TAG, "add cli name "+nameCB);
+      list.add(nameCB);
     }
 
     if (list.size() <= 0) {
+      Log.w(TAG, "nothing circle valid");
       return;
     }
 
@@ -379,7 +385,7 @@ public class ShareDataFragment extends Fragment {
 
     AlertDialog.Builder builder = new AlertDialog.Builder(this.getActivity());
 
-    builder.setTitle("Pick a color");
+    builder.setTitle("select circle for sharing!");
 
     final boolean[] checkItems = new boolean[list.size()];
     for (int i = 0; i < list.size(); ++i) {
@@ -405,9 +411,9 @@ public class ShareDataFragment extends Fragment {
         for (int i = 0; i < checkItems.length; i++) {
           if (true == checkItems[i]) {
             s += items[i] + "\n";
-            if (items[i].equals(WeShareApplication.localSvrService.getCirName())) {
+            if (items[i].equals(WeShareApplication.localSvrService.getCirNameCB())) {
               WeShareApplication.localSvrService.shareContent(file);
-            } else if (items[i].equals(WeShareApplication.localCliService.getCirName())) {
+            } else if (items[i].equals(WeShareApplication.localCliService.getCirNameCB())) {
               WeShareApplication.localCliService.shareContent(file);
             }
           }

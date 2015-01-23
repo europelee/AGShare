@@ -76,6 +76,8 @@ public class AjCommMgr {
   public AjBusSignalHandler mSigHandler = new AjBusSignalHandler();// null; // for client
 
   private String mCircleName = "weshare_circlce";
+  private String mCircleNameJoined = "";
+  private String mPrefix = "";
   private ISessionStatusListener mSessionStatusListener = null;
 
   private IAlljoynMsgListener mAlljoynMsgListener = null;
@@ -174,7 +176,7 @@ public class AjCommMgr {
   public void connect() {
     mBackgroundHandler.sendEmptyMessage(CONNECT);
   }
-  
+
   public void disconnect() {
     /* Disconnect to prevent any resource leaks. */
     mBackgroundHandler.sendEmptyMessage(DISCONNECT);
@@ -209,7 +211,7 @@ public class AjCommMgr {
       }
     }
   }
-  
+
   public void setAjCommParam(String sRole, Intent intent) {
 
     if (sRole.equals(CLIENT)) setRole((short) 1);
@@ -255,55 +257,55 @@ public class AjCommMgr {
       Log.i(LOG_TAG, "setBusDataListener fail: mSigHandler null");
     }
   }
-  
+
   public void getSessionStatusListener(ISessionStatusListener listener) {
     mSessionStatusListener = listener;
   }
-  
+
   public void setAlljoynMsgListener(IAlljoynMsgListener listener) {
     mAlljoynMsgListener = listener;
   }
-  
+
   public void setServiceFoundListener(IServiceFoundListener listener) {
     mServiceFoundListener = listener;
   }
-  
+
   public void setJoinListener(IJoinListener listener) {
     mJoinListener = listener;
   }
-  
+
   /**
    * 
    * setRecvLen(a temp method)
-   * @param len 
-   * void
-   * @exception 
-   * @since  1.0.0
+   * 
+   * @param len void
+   * @exception
+   * @since 1.0.0
    */
   public void setRecvLen(int len) {
-    
+
     if (null == mDev) {
       Log.e(LOG_TAG, "mDev is null");
       return;
     }
-    
+
     mDev.mRecvLen = len;
   }
-  
+
   /**
    * 
    * getRecvLen(a temp method)
-   * @return 
-   * int
-   * @exception 
-   * @since  1.0.0
+   * 
+   * @return int
+   * @exception
+   * @since 1.0.0
    */
   public int getRecvLen() {
     if (null == mDev) {
       Log.e(LOG_TAG, "mDev is null");
       return 0;
     }
-    
+
     int len = 0;
     try {
       len = mDev.getRecvLen();
@@ -313,7 +315,7 @@ public class AjCommMgr {
     }
     return len;
   }
-  
+
   private void setRole(short roleId) {
     switch (roleId) {
       case 0:
@@ -467,8 +469,7 @@ public class AjCommMgr {
 
       mServiceFoundList.add(new ServiceFound(name, transport));
 
-      // for cli
-      mCircleName = name.substring(namePrefix.length() + 1);
+      mPrefix = namePrefix;// const value for one app, or add inparam(nameprefix) for joinsession!
 
       if (null != mServiceFoundListener) {
         mServiceFoundListener.addServiceFound(new ServiceFound(name, transport));
@@ -829,8 +830,9 @@ public class AjCommMgr {
 
       if (null != mAlljoynMsgListener) {
         mAlljoynMsgListener
-            .onSucc("doDisconnect succ!", AlljoynConst.MSG_SUCC_ALLJOYN_SERVICE_EXIT);
+            .onSucc("doDisconnect succ!", AlljoynConst.MSG_SUCC_ALLJOYN_SERVICE_EXIT);      
       }
+      
       return;
     }
 
@@ -885,6 +887,13 @@ public class AjCommMgr {
       mAlljoynMsgListener.onSucc("doDisconnect succ!", AlljoynConst.MSG_SUCC_ALLJOYN_SERVICE_EXIT);
     }
 
+    if (null != mJoinListener) {
+      mJoinListener.getSessionStatus(mCircleName, false);
+    }
+    
+    if (null != mSessionStatusListener) {
+      mSessionStatusListener.getSessionStatus(mCircleNameJoined, false);
+    }
   }
 
   private boolean doJoinSession(String name) {
@@ -907,7 +916,7 @@ public class AjCommMgr {
               Status.OK);
 
           if (null != mSessionStatusListener) {
-            mSessionStatusListener.getSessionStatus(mCircleName, mIsjoinSession);
+            mSessionStatusListener.getSessionStatus(mCircleNameJoined, mIsjoinSession);
           }
         }
 
@@ -954,10 +963,13 @@ public class AjCommMgr {
       return false;
     }
 
+
+
     if (Status.ALLJOYN_JOINSESSION_REPLY_ALREADY_JOINED == status) {
       mIsjoinSession = true;
+      mCircleNameJoined = name.substring(mPrefix.length() + 1);
       if (null != mSessionStatusListener) {
-        mSessionStatusListener.getSessionStatus(mCircleName, mIsjoinSession);
+        mSessionStatusListener.getSessionStatus(mCircleNameJoined, mIsjoinSession);
       }
       return true;
     }
@@ -981,9 +993,9 @@ public class AjCommMgr {
     }
 
     mIsjoinSession = true;
-
+    mCircleNameJoined = name.substring(mPrefix.length() + 1);
     if (null != mSessionStatusListener) {
-      mSessionStatusListener.getSessionStatus(mCircleName, mIsjoinSession);
+      mSessionStatusListener.getSessionStatus(mCircleNameJoined, mIsjoinSession);
     }
 
     if (mDevI == null) {

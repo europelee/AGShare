@@ -68,7 +68,7 @@ public class UPnPService {
   private boolean mBRun = false;
 
   private volatile boolean mIsLost = true;
-  private String mCirName = "";
+  private String mCirNameCB = "";
   
   // for app layer
   private IGetServiceListener mCircleServicelistener = null;
@@ -163,7 +163,7 @@ public class UPnPService {
     public void getSessionStatus(String serviceName, boolean sessionStatus) {
       // TODO Auto-generated method stub
       Log.i(TAG, "svr session-status:"+sessionStatus);
-      mCirName = serviceName;
+      mCirNameCB = serviceName;
       mIsLost = !sessionStatus;
     }
 
@@ -195,8 +195,8 @@ public class UPnPService {
     @Override
     public void getSessionStatus(String serviceName, boolean status) {
       // TODO Auto-generated method stub
-      Log.i(TAG, "session-staus:" + status);
-      mCirName = serviceName;
+      Log.i(TAG, "session-staus:" + status+" cirName:"+serviceName);
+      mCirNameCB = serviceName;
       mIsLost = !status;
       if (null != mJoinCircleListener) {
         mJoinCircleListener.getJoinStatus(status);
@@ -505,8 +505,8 @@ public class UPnPService {
    * @exception 
    * @since  1.0.0
    */
-  public String getCirName() {
-    return mCirName;
+  public String getCirNameCB() {
+    return mCirNameCB;
   }
   
   public String getCircleName() {
