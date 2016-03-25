@@ -21,7 +21,8 @@ Dependencies:
 notice: you need to download gstreamer sdk for building gstutil.so from 
 gstreamerutil, link: http://gstreamer.freedesktop.org/data/pkg/android/ 
 the project uses 1.2.4 version.Then you should set environment var GSTREAMER_SDK_ROOT_ANDROID, its value:
-the folder path where you unzipped the above SDK.
+the folder path where you unzipped the above SDK, at last, you just ndk-build, and libgstutil.so and
+libgstreamer_android.so would be generated.
 
 2014-5-18 add GstreamerUtil module, implement audio streaming
 by alljoyn(Communication capability) and Gstreamer(media han-
