@@ -1,6 +1,4 @@
-#AGShare
-======
-
+#AGShare  
 AGShare includes three projects:   
 upnp library : everything connected and communicating;  
 GstreamerUtil library : support audio/video streaming;  
