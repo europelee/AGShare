@@ -14,9 +14,14 @@ from DeviceInterface/DeviceService, yes, the wrapper does
 one thing well, let app layer parsing data, modular programing,
 low coupling.   
 
+Dependencies:
+
+1. alljoyn, it already was included AjUtil upnp project.
+2. gstreamer:
 notice: you need to download gstreamer sdk for building gstutil.so from 
 gstreamerutil, link: http://gstreamer.freedesktop.org/data/pkg/android/ 
-the project uses 1.2.4 version.
+the project uses 1.2.4 version.Then you should set environment var GSTREAMER_SDK_ROOT_ANDROID, its value:
+the folder path where you unzipped the above SDK.
 
 2014-5-18 add GstreamerUtil module, implement audio streaming
 by alljoyn(Communication capability) and Gstreamer(media han-
