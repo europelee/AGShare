@@ -2,12 +2,12 @@
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
-    android:layout_width="match_parent"
+    android:layout_width="wrap_content"
     android:layout_height="match_parent"
     android:background="@drawable/main_bg" >
 
     <LinearLayout
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="vertical" >
 
@@ -24,28 +24,34 @@
             android:textSize="18sp" />
 
         <TableLayout
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:paddingLeft="8dip"
+            
             android:paddingTop="14dip" >
 
             <TableRow
-                android:layout_height="wrap_content"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
                 android:gravity="center" >
 
+                <!--
                 <Button
                     android:id="@+id/button_reset"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginLeft="35dp"
                     android:text="reset" />
+                -->
             </TableRow>
 
-            <TableRow android:layout_height="wrap_content" >
+            <TableRow
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center" >
 
                 <EditText
                     android:id="@+id/edit_servicename"
-                    android:layout_width="wrap_content"
+                    android:layout_width="20dp"
                     android:layout_height="wrap_content"
                     android:hint="[设定服务名]" >
                 </EditText>
@@ -54,25 +60,25 @@
                     android:id="@+id/button_createcircle"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginLeft="35dp"
                     android:text="create circle" />
             </TableRow>
 
             <TableRow
-                android:layout_height="wrap_content"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
                 android:paddingTop="20dip" >
 
                 <TextView
-                    android:layout_width="match_parent"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="find, then choose one below"
-                    android:textSize="18sp" />
+                    android:text="find,choose one from below"
+                    android:textSize="15sp" />
 
                 <Button
                     android:id="@+id/button_findcircle"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginLeft="35dp"
                     android:text="find circle" />
             </TableRow>
 

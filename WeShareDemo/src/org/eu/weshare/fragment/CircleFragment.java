@@ -181,7 +181,7 @@ public class CircleFragment extends DialogFragment {
     String devName = getDevModelName();
     mServiceNameEdit = (EditText) root.findViewById(R.id.edit_servicename);
     mServiceNameEdit.setHint("[" + EDIT_SERVICENAME_HINT + devName + "]");
-
+/*
     Button resetBtn = (Button) root.findViewById(R.id.button_reset);
     resetBtn.setOnClickListener(new View.OnClickListener() {
       
@@ -191,7 +191,7 @@ public class CircleFragment extends DialogFragment {
         //localService.stopService(CircleFragment.this.getActivity());       
       }
     });
-    
+ */   
     mCreateCircleBtn = (Button) root.findViewById(R.id.button_createcircle);
     mCreateCircleBtn.setOnClickListener(new View.OnClickListener() {
 
